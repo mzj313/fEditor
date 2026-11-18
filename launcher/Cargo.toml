@@ -1,0 +1,16 @@
+[package]
+name = "file-editor-launcher"
+version = "0.1.0"
+description = "fEditor 单文件启动器"
+edition = "2021"
+
+[[bin]]
+name = "fEditor"
+path = "src/main.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true

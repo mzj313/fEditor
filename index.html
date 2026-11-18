@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>fEditor</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="tabbar">
+        <div id="tabs"></div>
+        <button id="new-tab" title="新建标签（Ctrl/Cmd+N）">＋</button>
+      </header>
+
+      <div id="body">
+        <!-- Markdown 目录在左，资源管理器在右，两边都可隐藏 -->
+        <aside id="preview-toc" hidden></aside>
+        <div id="preview-resizer" hidden title="拖动调整目录宽度"></div>
+
+        <div id="main">
+          <div id="editor-host"></div>
+          <div id="preview-wrap" hidden>
+            <div id="preview-host"></div>
+          </div>
+          <div id="binary-wrap" hidden>
+            <div id="binary-toolbar" hidden></div>
+            <div id="binary-host"></div>
+          </div>
+          <!-- 终端放在工作区列内部：资源管理器保持到底，不被终端横切 -->
+          <section id="terminal-panel" hidden>
+            <div id="terminal-resizer" title="拖动调整终端高度"></div>
+            <header id="terminal-head">
+              <span id="terminal-title">终端</span>
+              <button id="terminal-close" title="关闭终端">×</button>
+            </header>
+            <div id="terminal-host"></div>
+          </section>
+        </div>
+
+        <div id="sidebar-resizer" title="拖动调整资源管理器宽度"></div>
+        <aside id="sidebar" hidden>
+          <div id="sidebar-head">
+            <div id="root-crumbs"></div>
+            <button id="root-up" title="切换到上一级目录">↑</button>
+            <button id="close-folder" title="隐藏资源管理器（可用 Ctrl+Shift+E 唤回）">×</button>
+          </div>
+          <div id="file-tree" tabindex="0"></div>
+        </aside>
+      </div>
+
+      <footer id="statusbar">
+        <span id="st-pos">行 1:1</span>
+        <span id="st-count">0 字</span>
+        <span id="st-encoding">UTF-8</span>
+        <span id="st-eol">LF</span>
+        <span id="st-lang">纯文本</span>
+        <span id="st-cursors"></span>
+        <!-- 界面缩放不为 100% 时才显示，方便确认手势有没有生效 -->
+        <span id="st-zoom"></span>
+        <span id="st-font" title="编辑器字号：滚轮调节，单击恢复默认"></span>
+        <button id="block-toggle" title="列块模式（Ctrl+Alt+B）">列块</button>
+        <span id="st-state">已保存</span>
+      </footer>
+    </div>
+
+    <div id="modal" hidden>
+      <div class="modal-card">
+        <p id="modal-message"></p>
+        <input id="modal-input" type="text" hidden />
+        <div id="modal-actions"></div>
+      </div>
+    </div>
+
+    <!-- 仅打印窗口使用：承载待打印的 Markdown 渲染结果 -->
+    <div id="print-root"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
