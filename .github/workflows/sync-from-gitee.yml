@@ -2,8 +2,8 @@ name: Sync from Gitee
 
 on:
   schedule:
-    # 每天 UTC 2:00（北京时间 10:00）自动同步
-    - cron: '0 2 * * *'
+    # 每 6 小时同步一次（UTC 0/6/12/18 点，即北京时间 8/14/20/2 点）
+    - cron: '0 */6 * * *'
   # 支持在 GitHub Actions 页面手动触发
   workflow_dispatch:
 
