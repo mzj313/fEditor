@@ -1,0 +1,29 @@
+name: Sync from Gitee
+
+on:
+  schedule:
+    # 每天 UTC 2:00（北京时间 10:00）自动同步
+    - cron: '0 2 * * *'
+  # 支持在 GitHub Actions 页面手动触发
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # 从 GitHub 仓库检出（workflow 文件本身必须存在于 GitHub 上）
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Sync Gitee -> GitHub
+        # 原理：把 Gitee 作为远程 fetch 过来，再强推到 GitHub
+        # 以 Gitee 为唯一权威源，GitHub 上的内容会被完全覆盖
+        # Gitee 仓库为公开仓库，匿名拉取即可，无需配置令牌
+        run: |
+          git config user.name "sync-bot"
+          git config user.email "sync-bot@users.noreply.github.com"
+          git remote add gitee "https://gitee.com/mzj313/fEditor.git"
+          git fetch gitee master
+          git push origin "refs/remotes/gitee/master:refs/heads/master" --force
