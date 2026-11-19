@@ -10,6 +10,9 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # 授权 GITHUB_TOKEN 可以推送到本仓库，否则强推 master 会被拒绝
+    permissions:
+      contents: write
     steps:
       # 从 GitHub 仓库检出（workflow 文件本身必须存在于 GitHub 上）
       - uses: actions/checkout@v4
