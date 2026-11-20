@@ -7,11 +7,16 @@ export const modalInput = document.getElementById("modal-input") as HTMLInputEle
 const modalActions = document.getElementById("modal-actions") as HTMLDivElement;
 
 export function ask(
-  message: string,
+  /** 字符串按纯文本渲染；传 HTMLElement 时可直接塞带样式的列表 */
+  message: string | HTMLElement,
   buttons: { label: string; value: string; primary?: boolean }[],
 ): Promise<string> {
   return new Promise((resolve) => {
-    modalMessage.textContent = message;
+    if (typeof message === "string") {
+      modalMessage.textContent = message;
+    } else {
+      modalMessage.replaceChildren(message);
+    }
     modalInput.hidden = true;
     modalActions.replaceChildren(
       ...buttons.map((item) => {

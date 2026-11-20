@@ -4,6 +4,15 @@
 
 import { getFontSize, onFontSizeChange, setFontSize } from "./font-size";
 import { getUiScale, resetUiZoom } from "./ui-zoom";
+import {
+  ACTION_LABELS,
+  comboFromEvent,
+  DEFAULT_SHORTCUTS,
+  getShortcut,
+  isCustomized,
+  setShortcutOverride,
+} from "./shortcuts";
+import { showTransientStatus } from "./statusbar";
 
 const FAMILY_KEY = "fEditor.editorFontFamily";
 const LINE_HEIGHT_KEY = "fEditor.editorLineHeight";
@@ -196,6 +205,88 @@ export function openSettingsDialog(): void {
     buildRow("字号", sizeStack),
     buildRow("行高", lineHeightSelect),
     buildRow("自动换行", wrapToggle),
+  ]);
+
+  /* ---- 快捷键 ---- */
+  const shortcutRows: HTMLElement[] = [];
+
+  /** 单个动作的行：名称 + 当前组合键 + 修改/取消 + 恢复默认 */
+  const buildShortcutRow = (action: string): HTMLElement => {
+    const row = el("div", "settings-shortcut-row");
+    const label = el("span", "settings-label", ACTION_LABELS[action] ?? action);
+    const combo = el("kbd", "settings-shortcut-combo", getShortcut(action));
+    const editButton = el("button", "settings-control settings-reset", "修改");
+    const resetButton = el("button", "settings-control settings-reset", "恢复默认");
+
+    // 捕获下一个按键作为新组合键；单独按修饰键继续等待，Esc 取消
+    const startCapture = (): void => {
+      editButton.textContent = "按下新组合键…";
+      editButton.classList.add("capturing");
+      const endCapture = (): void => {
+        window.removeEventListener("keydown", onCapture, true);
+        editButton.textContent = "修改";
+        editButton.classList.remove("capturing");
+      };
+      const onCapture = (event: KeyboardEvent): void => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "Escape") {
+          endCapture();
+          return;
+        }
+        // 只按了修饰键不算组合键，等待继续按主键
+        if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return;
+        endCapture();
+        const next = comboFromEvent(event);
+        setShortcutOverride(action, next);
+        refreshShortcutRows();
+        showTransientStatus(`已将「${ACTION_LABELS[action] ?? action}」设为 ${next}`);
+      };
+      window.addEventListener("keydown", onCapture, true);
+    };
+
+    editButton.addEventListener("click", startCapture);
+    resetButton.addEventListener("click", () => {
+      setShortcutOverride(action, null);
+      refreshShortcutRows();
+    });
+    resetButton.style.display = isCustomized(action) ? "" : "none";
+
+    row.append(label, combo, editButton, resetButton);
+    row.dataset.action = action;
+    return row;
+  };
+
+  /** 自定义变化后刷新所有行的显示（组合键文本 + 恢复默认按钮可见性） */
+  const refreshShortcutRows = (): void => {
+    for (const row of shortcutRows) {
+      const action = row.dataset.action as string;
+      (row.querySelector(".settings-shortcut-combo") as HTMLElement).textContent =
+        getShortcut(action);
+      const resetButton = row.querySelectorAll("button")[1] as HTMLButtonElement;
+      resetButton.style.display = isCustomized(action) ? "" : "none";
+    }
+  };
+
+  for (const action of Object.keys(DEFAULT_SHORTCUTS)) {
+    shortcutRows.push(buildShortcutRow(action));
+  }
+
+  const shortcutWrap = el("div", "settings-shortcut-list");
+  for (const row of shortcutRows) shortcutWrap.append(row);
+
+  const resetAllButton = el("button", "settings-control settings-reset", "全部恢复默认");
+  resetAllButton.addEventListener("click", () => {
+    for (const action of Object.keys(DEFAULT_SHORTCUTS)) setShortcutOverride(action, null);
+    refreshShortcutRows();
+  });
+  const resetAllRow = buildRow("快捷键", resetAllButton);
+  shortcutRows.push(resetAllRow);
+  resetAllRow.dataset.action = "";
+
+  registerCategory("shortcuts", "快捷键", [
+    resetAllRow,
+    shortcutWrap,
   ]);
 
   // 默认显示第一个分类

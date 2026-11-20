@@ -257,3 +257,24 @@ pub fn git_repo_info(path: String) -> Result<Option<GitRepoInfo>, String> {
     }
     Ok(Some(GitRepoInfo { root }))
 }
+
+/// 仓库改动清单：git status --porcelain 的原始行（状态码 + 路径），
+/// 供前端在 commit 前弹窗展示，让用户确认本次提交会包含哪些文件
+#[tauri::command]
+pub fn git_status(path: String) -> Result<Vec<String>, String> {
+    let output = git_command()
+        .arg("-C")
+        .arg(&path)
+        .args(["status", "--porcelain"])
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(stderr);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect())
+}

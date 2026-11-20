@@ -76,11 +76,14 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         &[&PredefinedMenuItem::quit(app, Some("退出 fEditor"))?],
     )?;
 
+    // 「最近」用网页下拉面板展示：原生菜单项只是文本标签，
+    // 做不了悬停显示删除按钮这类交互，前端点击此项后自行弹出面板
     let file_menu = Submenu::with_items(
         app,
         "文件",
         true,
         &[
+            &MenuItem::with_id(app, "file.new", "新建", true, Some("CmdOrCtrl+N"))?,
             &MenuItem::with_id(app, "file.open", "打开文件…", true, Some("CmdOrCtrl+O"))?,
             &MenuItem::with_id(
                 app,
@@ -90,11 +93,13 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 Some("CmdOrCtrl+Shift+O"),
             )?,
             &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "file.recent", "最近…", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "file.save", "保存", true, Some("CmdOrCtrl+S"))?,
             &MenuItem::with_id(
                 app,
                 "file.print",
-                "打印预览（Markdown → PDF）",
+                "打印预览",
                 true,
                 Some("CmdOrCtrl+P"),
             )?,
@@ -194,8 +199,10 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 "view.terminal",
                 "集成终端",
                 true,
-                None::<&str>,
+                Some("CmdOrCtrl+T"),
             )?,
+            // 侧栏面板 / 预览 / 目录分三类，视觉上用分割线隔开
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
                 "view.preview",
@@ -203,12 +210,13 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+E"),
             )?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
                 "view.toc",
                 "Markdown 目录",
                 true,
-                None::<&str>,
+                Some("CmdOrCtrl+Shift+M"),
             )?,
         ],
     )?;
@@ -318,6 +326,7 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_close,
             terminal::git_repo_info,
+            terminal::git_status,
             clipboard::clipboard_read,
             clipboard::clipboard_write,
         ])

@@ -1,7 +1,9 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { extractDocxHeadings } from "./docx-toc";
 import { parseXmind } from "./mindmap";
 import { disposeMindmap, renderMindmap } from "./mindmap-view";
 import { basename, type BinaryKind } from "./tabs";
+import { buildDocxToc, resetDocxToc, type TocItem } from "./toc";
 import { getUiScale } from "./ui-zoom";
 
 /** PDF / Word 通常比文本大得多，单独放宽到 100 MB */
@@ -169,7 +171,7 @@ async function renderBinaryPreviewInner(
     return;
   }
 
-  await renderDocx(host, bytes, token);
+  await renderDocx(host, bytes, token, path);
 }
 
 /* ---------------- PDF ---------------- */
@@ -391,7 +393,14 @@ window.addEventListener("ui-scale-changed", schedulePdfRepaint);
 
 /* ---------------- DOCX ---------------- */
 
-async function renderDocx(host: HTMLElement, bytes: Uint8Array, token: number): Promise<void> {
+async function renderDocx(
+  host: HTMLElement,
+  bytes: Uint8Array,
+  token: number,
+  path: string | null,
+): Promise<void> {
+  // 旧目录立即失效：重复打开同一文件或渲染失败时都不会残留上一个文档的目录
+  resetDocxToc();
   let renderAsync: typeof import("docx-preview").renderAsync;
   try {
     ({ renderAsync } = await import("docx-preview"));
@@ -435,6 +444,50 @@ async function renderDocx(host: HTMLElement, bytes: Uint8Array, token: number): 
 
   sanitizeDocx(pages);
   holdDocxLinks(pages);
+  buildDocxTocPanel(path, bytes, pages);
+}
+
+/**
+ * Word 目录：从 docx 的 XML 解析标题，再映射回 docx-preview 渲染出的段落元素。
+ * 解析与 DOM 映射都在渲染完成后进行，失败或无标题时目录面板保持隐藏。
+ */
+function buildDocxTocPanel(
+  path: string | null,
+  bytes: Uint8Array,
+  pages: HTMLElement,
+): void {
+  if (!path) return;
+  let entries: ReturnType<typeof extractDocxHeadings> = [];
+  try {
+    entries = extractDocxHeadings(bytes);
+  } catch {
+    return;
+  }
+  if (entries.length === 0) {
+    buildDocxToc(path, []);
+    return;
+  }
+
+  // docx-preview 每个正文 w:p 渲染一个 <p>；页眉页脚是 <header>/<footer> 标签容器，
+  // 其中的段落不计入正文序号，必须排除否则标题映射整体错位
+  const paragraphs = Array.from(pages.querySelectorAll("p")).filter(
+    (p) => !p.closest("header, footer"),
+  );
+  const items: TocItem[] = [];
+  for (const entry of entries) {
+    let target: HTMLParagraphElement | undefined = paragraphs[entry.paraIndex];
+    // 序号对应可能因渲染差异错位，文本不一致时按精确文本全量匹配兜底
+    if (!target || (target.textContent ?? "").trim() !== entry.text) {
+      target = paragraphs.find((p) => (p.textContent ?? "").trim() === entry.text);
+    }
+    if (!target) continue;
+    items.push({
+      level: entry.level,
+      text: entry.text,
+      onClick: () => target?.scrollIntoView({ block: "start", behavior: "smooth" }),
+    });
+  }
+  buildDocxToc(path, items);
 }
 
 /** docx 是外部文件，渲染出来的 HTML 不能带脚本和远程资源 */
