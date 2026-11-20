@@ -559,6 +559,38 @@ body.resizing-y {
   line-height: 1.7;
 }
 
+/* CSV 表格预览：首行作表头 sticky 固定，斑马纹行，窄列不换行靠横向滚动 */
+.csv-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.csv-table th,
+.csv-table td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.csv-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+
+.csv-table tbody tr:nth-child(even) {
+  background: var(--bg-soft);
+}
+
+.csv-truncated {
+  margin-top: 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 /* 交互 SVG：图内脚本在沙箱 iframe 里运行，尺寸铺满预览区，滚动交给 iframe 内部 */
 #preview-host .svg-interactive {
   display: block;

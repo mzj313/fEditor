@@ -18,6 +18,7 @@ import { syncTocVisibility } from "./toc";
 import {
   basename,
   binaryKindOf,
+  isCsv,
   isJson,
   isMarkdown,
   isSvg,
@@ -101,7 +102,8 @@ export function applyPayload(tab: Tab, payload: FilePayload): void {
 }
 
 export function defaultPreview(tab: Tab): void {
-  if (isMarkdown(tab.title) || isSvg(tab.title)) tab.preview = true;
+  // CSV/TSV 默认进表格预览：数据文件以"看表"为主，需要编辑时 Ctrl+E 切回文本
+  if (isMarkdown(tab.title) || isSvg(tab.title) || isCsv(tab.title)) tab.preview = true;
 }
 
 /**
@@ -171,7 +173,9 @@ async function activateNow(id: string, focus: boolean, followFolder: boolean): P
   hidePreview();
   // 预览型标签先切到预览面板占位，避免渲染完成前编辑器原文先闪现
   const willPreview =
-    !tab.binary && tab.preview && (isMarkdown(tab.title) || isSvg(tab.title) || isMindText(tab.title));
+    !tab.binary &&
+    tab.preview &&
+    (isMarkdown(tab.title) || isSvg(tab.title) || isMindText(tab.title) || isCsv(tab.title));
   if (willPreview) stagePreviewPanel();
 
   if (tab.binary) {

@@ -11,3 +11,6 @@ launcher/target
 
 # 系统文件
 .DS_Store
+
+# Trae IDE 临时产物
+.trae-html-share-packages/

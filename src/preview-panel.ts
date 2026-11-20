@@ -3,11 +3,12 @@ import { disposeBinaryPreview, renderBinaryPreview } from "./binary-preview";
 import { message } from "./dialogs";
 import type { EditorController } from "./editor";
 import { renderMarkdown, renderMermaidDiagrams, resolveLocalImages } from "./preview";
+import { renderCsvPreview } from "./csv-preview";
 import { isMindText, parseFreemind, parseOpml } from "./mindmap";
 import { disposeMindmap, renderMindmap } from "./mindmap-view";
 import { activeText } from "./session-state";
 import { showTransientStatus, updateStatus } from "./statusbar";
-import { isMarkdown, isSvg, type Tab, type TabStore } from "./tabs";
+import { isMarkdown, isSvg, isCsv, type Tab, type TabStore } from "./tabs";
 import { buildToc, syncTocVisibility } from "./toc";
 
 const editorHost = document.getElementById("editor-host") as HTMLDivElement;
@@ -74,7 +75,20 @@ export async function showBinary(tab: Tab): Promise<void> {
 }
 
 export async function showPreview(tab: Tab): Promise<void> {
-  if (!isMarkdown(tab.title) && !isSvg(tab.title) && !isMindText(tab.title)) return;
+  if (!isMarkdown(tab.title) && !isSvg(tab.title) && !isMindText(tab.title) && !isCsv(tab.title))
+    return;
+
+  // CSV/TSV：表格预览直接取编辑器当前文本，编辑与预览内容实时一致
+  if (isCsv(tab.title)) {
+    previewHost.replaceChildren();
+    renderCsvPreview(previewHost, activeText(tab));
+    previewWrap.hidden = false;
+    editorHost.hidden = true;
+    // 表格没有标题结构，左侧目录一并隐藏
+    syncTocVisibility();
+    updateStatus();
+    return;
+  }
 
   // .mm / .opml 是纯文本 XML：保留编辑能力，预览时按当前编辑器内容解析
   if (isMindText(tab.title)) {
@@ -176,7 +190,7 @@ function createInteractiveSvgFrame(tab: Tab): HTMLIFrameElement {
 export async function togglePreview(): Promise<void> {
   if (!store || !editor) return;
   const tab = store.active;
-  if (!tab || !(isMarkdown(tab.title) || isSvg(tab.title) || isMindText(tab.title)))
+  if (!tab || !(isMarkdown(tab.title) || isSvg(tab.title) || isMindText(tab.title) || isCsv(tab.title)))
     return;
   tab.preview = !tab.preview;
   if (tab.preview) {

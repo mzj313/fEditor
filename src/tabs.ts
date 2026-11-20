@@ -75,6 +75,12 @@ export function isToml(title: string): boolean {
   return title.toLowerCase().endsWith(".toml");
 }
 
+/** CSV/TSV 保留文本编辑能力，同时支持表格预览，扩展名大小写不敏感。 */
+export function isCsv(title: string): boolean {
+  const lower = title.toLowerCase();
+  return lower.endsWith(".csv") || lower.endsWith(".tsv");
+}
+
 /** PDF / Word / 图片 / 音视频 / XMind 走只读预览，不进入文本编辑器。 */
 export function binaryKindOf(title: string): BinaryKind | null {
   const lower = title.toLowerCase();
