@@ -36,10 +36,23 @@ echo [3/4] Building single-file launcher (embeds app + WebView2Loader.dll) ...
 "%CARGO%" build --release --manifest-path launcher\Cargo.toml
 if errorlevel 1 goto :fail
 
-echo [4/4] Copying result to dist-build ...
+echo [4/4] Copying result to dist-build and stable launcher path ...
 if not exist dist-build mkdir dist-build
 copy /y launcher\target\release\fEditor.exe dist-build\fEditor.exe >nul
 if errorlevel 1 goto :fail
+
+rem Keep a stable launcher outside the repository. The taskbar shortcut must
+rem point at this file: every build overwrites it, so the pinned icon always
+rem runs the launcher first and the launcher unpacks the newest app.
+rem Do not pin the extracted copy under rt\ - it never updates by itself.
+set "STABLE_DIR=%LOCALAPPDATA%\fEditor"
+if not exist "%STABLE_DIR%" mkdir "%STABLE_DIR%"
+copy /y launcher\target\release\fEditor.exe "%STABLE_DIR%\fEditor.exe" >nul
+if errorlevel 1 (
+  echo [WARN] Could not update "%STABLE_DIR%\fEditor.exe" - close the running launcher and rebuild.
+) else (
+  echo Stable launcher: %STABLE_DIR%\fEditor.exe
+)
 
 set "TOO_BIG="
 for %%f in (dist-build\fEditor.exe) do (

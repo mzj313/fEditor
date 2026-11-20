@@ -41,8 +41,8 @@ export class TerminalPanel {
     return !this.panel.hidden;
   }
 
-  /** 在指定目录打开终端；面板已存在时只切换目录 */
-  async open(cwd: string): Promise<void> {
+  /** 在指定目录打开终端；面板已存在时只切换目录。focus=false 用于启动时默认展示，不抢编辑器焦点 */
+  async open(cwd: string, focus = true): Promise<void> {
     this.panel.hidden = false;
     await this.ensureTerminal();
 
@@ -54,7 +54,7 @@ export class TerminalPanel {
       this.titleEl.textContent = cwd;
       this.titleEl.title = cwd;
       this.fitNow();
-      this.term?.focus();
+      if (focus) this.term?.focus();
       return;
     }
 
@@ -63,7 +63,7 @@ export class TerminalPanel {
     this.title = cwd;
     this.titleEl.textContent = cwd;
     this.titleEl.title = cwd;
-    this.term?.focus();
+    if (focus) this.term?.focus();
   }
 
   hide(): void {

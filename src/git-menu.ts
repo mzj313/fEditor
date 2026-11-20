@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showContextMenu, type MenuEntry } from "./context-menu";
-import { promptText } from "./dialogs";
+import { ask, message, promptText } from "./dialogs";
 import type { FileTree, TreeEntry } from "./file-tree";
 import { parentDir } from "./paths";
 import type { TerminalPanel } from "./terminal";
@@ -96,8 +96,61 @@ async function runGitLog(dir: string, scope: string): Promise<void> {
   await terminal.run(dir, `git log --graph --date=short -20 --pretty=${format}${filter}`);
 }
 
+/** 状态码配色：新增绿、修改橙、删除红、重命名/复制紫、未跟踪蓝 */
+const STATUS_COLORS: Record<string, string> = {
+  A: "#3fb950",
+  M: "#d29922",
+  D: "#f85149",
+  R: "#a371f7",
+  C: "#a371f7",
+  "?": "#58a6ff",
+};
+
+/** porcelain 两位状态码里取非空格那位决定颜色；?? 整体按未跟踪处理 */
+function statusColor(code: string): string {
+  if (code.includes("?")) return STATUS_COLORS["?"];
+  return STATUS_COLORS[code.trim().charAt(0)] ?? "#8b949e";
+}
+
+/** 把 git status --porcelain 的行渲染成彩色清单：状态码着色 + 文件路径 */
+function buildChangeList(changes: string[]): HTMLElement {
+  const wrap = document.createElement("div");
+  const head = document.createElement("div");
+  head.textContent = `本次将提交以下 ${changes.length} 个文件：`;
+  head.style.marginBottom = "6px";
+  wrap.append(head);
+
+  const list = document.createElement("div");
+  list.style.cssText =
+    "max-height:260px;overflow-y:auto;text-align:left;font-family:Consolas,monospace;font-size:12px;line-height:1.6;";
+  for (const line of changes) {
+    const row = document.createElement("div");
+    const badge = document.createElement("span");
+    badge.textContent = line.slice(0, 2);
+    badge.style.cssText = `color:${statusColor(line.slice(0, 2))};font-weight:600;white-space:pre;`;
+    const name = document.createElement("span");
+    name.textContent = line.slice(2);
+    name.style.whiteSpace = "pre-wrap";
+    row.append(badge, name);
+    list.append(row);
+  }
+  wrap.append(list);
+  return wrap;
+}
+
 async function commitAllChanges(dir: string): Promise<void> {
   if (!terminal) return;
+  // 提交前先展示改动清单，让用户确认这次提交会包含哪些文件
+  const changes = await invoke<string[]>("git_status", { path: dir }).catch(() => [] as string[]);
+  if (changes.length === 0) {
+    await message("没有可提交的改动（工作区是干净的）。");
+    return;
+  }
+  const choice = await ask(buildChangeList(changes), [
+    { label: "继续提交", value: "ok", primary: true },
+    { label: "取消", value: "cancel" },
+  ]);
+  if (choice !== "ok") return;
   const text = await promptText("提交信息");
   if (!text) return;
   // 先暂存全部改动再提交，提交信息按当前 shell 的引号规则转义

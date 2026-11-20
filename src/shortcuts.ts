@@ -1,0 +1,108 @@
+//! 快捷键注册表：默认组合键 + 用户自定义覆盖（localStorage）。
+//! 原生菜单的加速键只是显示，实际触发统一在 bindShortcuts 的 keydown 里，
+//! 自定义只影响 keydown 匹配，菜单栏显示的仍是默认组合键。
+
+const STORE_KEY = "fEditor.shortcuts";
+
+/** 各菜单动作的默认组合键，key 与 Rust 菜单项 id 一致 */
+export const DEFAULT_SHORTCUTS: Record<string, string> = {
+  "file.new": "Ctrl+N",
+  "file.open": "Ctrl+O",
+  "folder.open": "Ctrl+Shift+O",
+  "file.save": "Ctrl+S",
+  "view.tree": "Ctrl+Shift+E",
+  "view.terminal": "Ctrl+T",
+  "view.preview": "Ctrl+E",
+  "view.toc": "Ctrl+Shift+M",
+  "edit.find": "Ctrl+F",
+  "edit.replace": "Ctrl+H",
+  "format.bold": "Ctrl+B",
+  "format.italic": "Ctrl+I",
+  "format.strike": "Ctrl+Shift+X",
+  "format.h1": "Ctrl+Alt+1",
+  "format.h2": "Ctrl+Alt+2",
+  "format.h3": "Ctrl+Alt+3",
+  "format.bullet": "Ctrl+Alt+L",
+  "format.ordered": "Ctrl+Alt+O",
+  "format.quote": "Ctrl+Alt+Q",
+  "format.link": "Ctrl+Alt+K",
+  "format.code": "Ctrl+Alt+C",
+  "format.document": "Ctrl+Alt+J",
+  "edit.block": "Ctrl+Alt+B",
+};
+
+/** 设置面板里展示的中文名称 */
+export const ACTION_LABELS: Record<string, string> = {
+  "file.new": "新建",
+  "file.open": "打开文件",
+  "folder.open": "打开文件夹",
+  "file.save": "保存",
+  "view.tree": "资源管理器",
+  "view.terminal": "集成终端",
+  "view.preview": "切换预览",
+  "view.toc": "Markdown 目录",
+  "edit.find": "查找",
+  "edit.replace": "替换",
+  "format.bold": "加粗",
+  "format.italic": "斜体",
+  "format.strike": "删除线",
+  "format.h1": "标题 1",
+  "format.h2": "标题 2",
+  "format.h3": "标题 3",
+  "format.bullet": "无序列表",
+  "format.ordered": "有序列表",
+  "format.quote": "引用",
+  "format.link": "插入链接",
+  "format.code": "行内代码",
+  "format.document": "格式化文档",
+  "edit.block": "列块模式",
+};
+
+function loadOverrides(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function saveOverrides(overrides: Record<string, string>): void {
+  localStorage.setItem(STORE_KEY, JSON.stringify(overrides));
+  // 通知 bindShortcuts 立即刷新映射，无需重启
+  window.dispatchEvent(new CustomEvent("shortcuts-changed"));
+}
+
+/** 生效组合键 = 自定义覆盖 ?? 默认值 */
+export function getShortcut(action: string): string {
+  return loadOverrides()[action] ?? DEFAULT_SHORTCUTS[action] ?? "";
+}
+
+/** 是否被用户改过（决定设置面板里是否显示「恢复默认」） */
+export function isCustomized(action: string): boolean {
+  return action in loadOverrides();
+}
+
+/** 自定义组合键；传 null 表示恢复默认。同组合键的其他动作会被让出，避免一键多绑 */
+export function setShortcutOverride(action: string, combo: string | null): void {
+  const overrides = loadOverrides();
+  if (combo === null) {
+    delete overrides[action];
+  } else {
+    overrides[action] = combo;
+    // 冲突处理：其他动作绑定了同一组合键时自动恢复其默认值
+    for (const [other, otherCombo] of Object.entries(overrides)) {
+      if (other !== action && otherCombo === combo) delete overrides[other];
+    }
+  }
+  saveOverrides(overrides);
+}
+
+/** 键盘事件归一化成「Ctrl+Alt+Shift+Key」格式，macOS 的 Cmd 统一按 Ctrl 处理 */
+export function comboFromEvent(event: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (event.ctrlKey || event.metaKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
+  return [...parts, key].join("+");
+}

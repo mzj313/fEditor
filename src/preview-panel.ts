@@ -53,6 +53,19 @@ export function showBinaryPanel(): void {
   binaryWrap.hidden = false;
 }
 
+/**
+ * 预览型标签切换时先占位：立刻切到预览面板并显示加载提示，
+ * 避免 Markdown 渲染完成前编辑器原文先闪现出来
+ */
+export function stagePreviewPanel(): void {
+  const hint = document.createElement("div");
+  hint.className = "binary-loading";
+  hint.textContent = "正在渲染预览…";
+  previewHost.replaceChildren(hint);
+  previewWrap.hidden = false;
+  editorHost.hidden = true;
+}
+
 export async function showBinary(tab: Tab): Promise<void> {
   if (!tab.binary || !tab.path) return;
   // 可见性只由 activate 同步决定：这里再改一次会让旧的异步渲染

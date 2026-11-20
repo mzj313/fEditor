@@ -93,7 +93,22 @@ export function addRecent(path: string): void {
   if (recent.length > recentLimit) recent.length = recentLimit;
 }
 
+/** 「最近」面板里删除单条记录（按展示顺序的索引） */
+export function removeRecent(index: number): void {
+  if (index >= 0 && index < recent.length) recent.splice(index, 1);
+}
+
+/** 清空全部最近记录 */
+export function clearRecent(): void {
+  recent = [];
+}
+
 /** 启动时从会话文件恢复最近文件列表 */
 export function setRecent(paths: string[]): void {
   recent = paths;
+}
+
+/** 「最近」菜单点击时按索引取回路径（顺序与菜单项一致） */
+export function getRecent(): string[] {
+  return recent;
 }
