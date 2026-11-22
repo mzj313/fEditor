@@ -13,6 +13,10 @@ import {
   setShortcutOverride,
 } from "./shortcuts";
 import { showTransientStatus } from "./statusbar";
+import {
+  isHoverTranslateEnabled,
+  setHoverTranslateEnabled,
+} from "./translate-tooltip";
 
 const FAMILY_KEY = "fEditor.editorFontFamily";
 const LINE_HEIGHT_KEY = "fEditor.editorLineHeight";
@@ -205,6 +209,26 @@ export function openSettingsDialog(): void {
     buildRow("字号", sizeStack),
     buildRow("行高", lineHeightSelect),
     buildRow("自动换行", wrapToggle),
+  ]);
+
+  /* ---- 翻译 ---- */
+  const translateToggle = el("input", "settings-toggle") as HTMLInputElement;
+  translateToggle.type = "checkbox";
+  translateToggle.checked = isHoverTranslateEnabled();
+  translateToggle.addEventListener("change", () => {
+    setHoverTranslateEnabled(translateToggle.checked);
+    showTransientStatus(translateToggle.checked ? "悬停翻译已开启" : "悬停翻译已关闭");
+  });
+
+  const translateHint = el(
+    "p",
+    "settings-hint",
+    "编辑区与 Markdown 预览中，鼠标停在英文单词上约 0.35 秒即可看到中文释义，点弹窗右侧的喇叭可以听发音。词库与语音都走本机，完全离线，不会上传任何内容。",
+  );
+
+  registerCategory("translate", "翻译", [
+    buildRow("悬停翻译", translateToggle),
+    translateHint,
   ]);
 
   /* ---- 快捷键 ---- */

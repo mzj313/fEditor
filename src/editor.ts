@@ -17,6 +17,7 @@ import { tags } from "@lezer/highlight";
 import { jsonLanguage } from "./json-lang";
 import { openFindDialog } from "./find-dialog";
 import { searchModule } from "./search";
+import { hoverTranslate } from "./translate-tooltip";
 
 export interface EditorHooks {
   onChange(): void;
@@ -184,6 +185,7 @@ export class EditorController {
       wrapCompartment.of(EditorView.lineWrapping),
       languageCompartment.of([]),
       searchCompartment.of([]),
+      hoverTranslate(),
       readOnlyCompartment.of(readOnly ? EditorState.readOnly.of(true) : []),
       keymap.of([
         { key: "Mod-Shift-l", run: () => this.splitLinesIntoCursors() },

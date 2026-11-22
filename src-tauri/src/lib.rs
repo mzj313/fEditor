@@ -1,8 +1,10 @@
 mod clipboard;
+mod dict;
 mod fs_service;
 mod media;
 mod print_service;
 mod session;
+mod speech;
 mod terminal;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -329,6 +331,8 @@ pub fn run() {
             terminal::git_status,
             clipboard::clipboard_read,
             clipboard::clipboard_write,
+            dict::dict_lookup,
+            speech::speak_word,
         ])
         .run(tauri::generate_context!())
         .expect("error while running fEditor");

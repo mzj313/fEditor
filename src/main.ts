@@ -37,6 +37,7 @@ import { bindTabDrag, bindTabDragGlobal, initTabDrag } from "./tab-drag";
 import { initGitMenu, showTreeMenu } from "./git-menu";
 import { initSessionState, buildSession, setRecent } from "./session-state";
 import { initPreviewPanel } from "./preview-panel";
+import { initPreviewTranslate } from "./translate-tooltip";
 import { initAppContext, app } from "./app-context";
 import {
   initSidebar,
@@ -134,6 +135,7 @@ initTabDrag({
 });
 initGitMenu({ tree, terminal, openPath });
 initPreviewPanel({ store, editor, openPath });
+initPreviewTranslate();
 
 // 业务模块装配：跨界回调统一在 main 注入，模块之间保持单向依赖
 initSidebar({ openFolder });
