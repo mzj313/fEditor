@@ -17,19 +17,17 @@ pub fn speak_word(word: String) -> Result<(), String> {
     imp::speak(&text)
 }
 
-/// 只接受英文单词或词组。词典条目与选区翻译都是这种形式，这里再收一次口，
-/// 避免把任意文本原样交给系统命令。
+/// 发音内容来自弹窗：本地词条是英文单词，中译英结果是英文短句。
+/// 这里只挡住空内容、控制字符和过长文本；文本始终作为单个参数传给系统命令，
+/// 不经过 shell，不需要额外转义。
 fn sanitize(word: &str) -> Result<String, String> {
     let text = word.trim();
     // 词组翻译场景选区可达数百字符，与在线接口上限保持一致
-    if text.is_empty() || text.len() > 500 {
+    if text.is_empty() || text.chars().count() > 500 {
         return Err("没有可朗读的内容".into());
     }
-    if !text
-        .chars()
-        .all(|c| c.is_ascii_alphabetic() || c == '\'' || c == '-' || c == ' ')
-    {
-        return Err("只支持英文单词发音".into());
+    if text.chars().any(char::is_control) {
+        return Err("朗读内容含有不可见字符".into());
     }
     Ok(text.to_string())
 }
@@ -168,17 +166,23 @@ mod tests {
     use super::sanitize;
 
     #[test]
-    fn accepts_english_words() {
-        for word in ["hello", "don't", "well-known", "New York"] {
-            assert!(sanitize(word).is_ok(), "{word} 应该被接受");
+    fn accepts_words_and_sentences() {
+        for text in [
+            "hello",
+            "don't",
+            "well-known",
+            "New York",
+            "Hello, world!",
+            "3 days later",
+        ] {
+            assert!(sanitize(text).is_ok(), "{text} 应该被接受");
         }
     }
 
     #[test]
-    fn rejects_non_english() {
-        assert!(sanitize("你好").is_err());
+    fn rejects_empty_or_unusable_text() {
         assert!(sanitize("   ").is_err());
-        assert!(sanitize("hello; rm -rf /").is_err());
-        assert!(sanitize(&"a".repeat(65)).is_err());
+        assert!(sanitize(&"a".repeat(501)).is_err());
+        assert!(sanitize("hello\nworld").is_err());
     }
 }

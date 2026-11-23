@@ -129,6 +129,17 @@ function fallbackSpeak(word: string): void {
   window.speechSynthesis.speak(utterance);
 }
 
+const CJK_TEXT = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+/** 挑出弹窗里该朗读的英文内容：本地词条读原词，中译英结果读译文 */
+function speakTarget(entry: DictEntry): string | null {
+  const picked = [entry.word, entry.translation].find(
+    (text) => /[A-Za-z]/.test(text) && !CJK_TEXT.test(text),
+  );
+  if (!picked) return null;
+  return picked.replace(/\s+/g, " ").trim().slice(0, 200) || null;
+}
+
 /** 取光标位置所在的英文单词；中文、数字和符号不触发 */
 function wordAt(view: EditorView, pos: number): Hit | null {
   const line = view.state.doc.lineAt(pos);
@@ -175,20 +186,23 @@ function fillDom(dom: HTMLDivElement, entry: DictEntry): void {
     head.append(badge);
   }
 
-  const speak = document.createElement("button");
-  speak.type = "button";
-  speak.className = "cm-translate-speak";
-  speak.title = `朗读 ${entry.word}`;
-  speak.setAttribute("aria-label", `朗读 ${entry.word}`);
-  speak.innerHTML = SPEAKER_ICON;
-  // 按下时不要抢焦点、不要改变编辑器选区；预览弹窗的全局 mousedown 也要放行
-  speak.addEventListener("mousedown", (event) => event.preventDefault());
-  speak.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void speakWord(entry.word);
-  });
-  head.append(speak);
+  const speakText = speakTarget(entry);
+  if (speakText) {
+    const speak = document.createElement("button");
+    speak.type = "button";
+    speak.className = "cm-translate-speak";
+    speak.title = `朗读 ${speakText}`;
+    speak.setAttribute("aria-label", `朗读 ${speakText}`);
+    speak.innerHTML = SPEAKER_ICON;
+    // 按下时不要抢焦点、不要改变编辑器选区；预览弹窗的全局 mousedown 也要放行
+    speak.addEventListener("mousedown", (event) => event.preventDefault());
+    speak.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void speakWord(speakText);
+    });
+    head.append(speak);
+  }
 
   const body = document.createElement("div");
   body.className = "cm-translate-body";
