@@ -7,6 +7,7 @@ mod session;
 mod shell_integration;
 mod speech;
 mod terminal;
+mod updater;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
@@ -239,7 +240,11 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         app,
         "帮助",
         true,
-        &[&MenuItem::with_id(app, "help.about", "关于 fEditor", true, None::<&str>)?],
+        &[
+            &MenuItem::with_id(app, "help.update", "检查更新", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "help.about", "关于 fEditor", true, None::<&str>)?,
+        ],
     )?;
 
     #[cfg(target_os = "macos")]
@@ -328,11 +333,13 @@ pub fn run() {
             fs_service::path_exists,
             fs_service::cli_files,
             fs_service::cli_dir,
+            fs_service::list_audio_siblings,
             fs_service::pick_open_files,
             fs_service::pick_save_path,
             fs_service::pick_open_folder,
             fs_service::set_root,
             fs_service::read_tree,
+            fs_service::search_files,
             fs_service::inspect_path,
             fs_service::write_startup_log,
             print_service::print_markdown,
@@ -352,6 +359,10 @@ pub fn run() {
             clipboard::clipboard_write,
             dict::dict_lookup,
             dict::dict_lookup_online,
+            updater::update_check,
+            updater::update_download,
+            updater::update_restart,
+            updater::open_release_page,
             speech::speak_word,
         ])
         .run(tauri::generate_context!())

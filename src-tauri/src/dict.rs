@@ -116,15 +116,35 @@ struct MyMemoryData {
     text: Option<String>,
 }
 
-/// 本地词典查不到时的可选回退：请求 MyMemory 免费接口做英译中。
-/// 支持单词和选区词组；超时 5 秒，任何失败都返回 None，前端静默不弹窗。
+/// 是否中日韩字符：用于判定在线翻译方向
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32, 0x3040..=0x30ff | 0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff)
+}
+
+/// 英文按词典口径归一化；含中日韩字符时保留原文，走中译英
+fn query_text(word: &str) -> String {
+    let trimmed = word.trim();
+    if trimmed.chars().any(is_cjk) {
+        trimmed.to_string()
+    } else {
+        normalize(trimmed)
+    }
+}
+
+/// 本地词典查不到时的可选回退：请求 MyMemory 免费接口。
+/// 英文单词/词组英译中，含中文时自动中译英；超时 5 秒，任何失败都返回 None。
 #[tauri::command]
 pub fn dict_lookup_online(word: String) -> Option<DictEntry> {
-    let key = normalize(&word);
-    // MyMemory 单次查询上限 500 字符
-    if key.is_empty() || key.len() > 500 {
+    let key = query_text(&word);
+    // MyMemory 单次查询上限 500 字符；按字符数而非字节数计算
+    if key.is_empty() || key.chars().count() > 500 {
         return None;
     }
+    let langpair = if key.chars().any(is_cjk) {
+        "zh-CN|en"
+    } else {
+        "en|zh-CN"
+    };
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -133,7 +153,7 @@ pub fn dict_lookup_online(word: String) -> Option<DictEntry> {
     // 词组含空格等字符，必须走 query 参数自动 URL 编码，不能手动拼 URL
     let response: MyMemoryResponse = client
         .get("https://api.mymemory.translated.net/get")
-        .query(&[("q", key.as_str()), ("langpair", "en|zh-CN")])
+        .query(&[("q", key.as_str()), ("langpair", langpair)])
         .send()
         .ok()?
         .text()

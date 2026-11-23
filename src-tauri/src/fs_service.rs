@@ -284,10 +284,90 @@ pub fn read_tree(state: State<'_, AppState>, path: Option<String>) -> Result<Vec
     Ok(entries)
 }
 
+/// 搜索命中的文件；depth 是相对搜索起点的子目录层数，0 表示起点自身这一层
+#[derive(serde::Serialize)]
+pub struct SearchHit {
+    path: String,
+    name: String,
+    depth: u32,
+}
+
+/// 资源管理器文件名搜索：从起点目录逐层下探，关键字按忽略大小写的包含匹配。
+/// max_depth 是额外下探的子目录层数，0 表示只看当前层，u32::MAX 表示不限。
+#[tauri::command]
+pub fn search_files(
+    state: State<'_, AppState>,
+    root: Option<String>,
+    keyword: String,
+    max_depth: u32,
+) -> Result<Vec<SearchHit>, String> {
+    let start = match root {
+        Some(value) => resolve_inside_root(&state, &value)?,
+        None => lock_root(&state)?,
+    };
+    if !start.is_dir() {
+        return Err("目标不是文件夹".to_string());
+    }
+
+    let needle = keyword.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 结果与访问量双上限：不限深度时避免超大工作区把界面拖死
+    const MAX_HITS: usize = 500;
+    const MAX_VISITED: usize = 200_000;
+
+    let mut hits = Vec::new();
+    let mut queue = std::collections::VecDeque::from([(start, 0u32)]);
+    let mut visited = 0usize;
+
+    while let Some((dir, depth)) = queue.pop_front() {
+        let Ok(reader) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in reader.flatten() {
+            visited += 1;
+            if visited > MAX_VISITED || hits.len() >= MAX_HITS {
+                break;
+            }
+            let Ok(file_type) = item.file_type() else {
+                continue;
+            };
+            // 与 read_tree 保持一致：符号链接一律跳过，忽略目录不下探也不显示
+            if file_type.is_symlink() {
+                continue;
+            }
+            let name = item.file_name().to_string_lossy().to_string();
+            if file_type.is_dir() {
+                if IGNORED_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                if depth < max_depth {
+                    queue.push_back((item.path(), depth + 1));
+                }
+                continue;
+            }
+            if name.to_lowercase().contains(&needle) {
+                hits.push(SearchHit {
+                    path: display_path(&item.path()),
+                    name,
+                    depth,
+                });
+            }
+        }
+        if hits.len() >= MAX_HITS || visited > MAX_VISITED {
+            break;
+        }
+    }
+
+    hits.sort_by(|a, b| natural_cmp(&a.name, &b.name).then_with(|| a.path.cmp(&b.path)));
+    Ok(hits)
+}
+
 /// 让用户在原生对话框里选择一个文件夹作为工作区
 #[tauri::command]
-pub async fn pick_open_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
+pub async fn pick_open_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {    use tauri_plugin_dialog::DialogExt;
 
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
@@ -543,6 +623,38 @@ pub fn cli_files() -> Vec<String> {
 pub fn cli_dir() -> Option<String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     dir_from_args(&args)
+}
+
+/// 播放器用的同目录音频列表：按文件名排序，供「顺序播放 / 列表循环」找下一首。
+/// 扩展名与前端 tabs.rs 的音频判定保持一致，避免列出播不了的文件。
+const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "wav", "aac", "flac"];
+
+#[tauri::command]
+pub fn list_audio_siblings(path: String) -> Vec<String> {
+    let Some(dir) = Path::new(&path).parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|item| item.is_file())
+        .filter(|item| {
+            item.extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| AUDIO_EXTENSIONS.iter().any(|known| ext.eq_ignore_ascii_case(known)))
+                .unwrap_or(false)
+        })
+        .collect();
+    // 忽略大小写的文件名排序，和资源管理器里的观感一致
+    files.sort_by_key(|item| {
+        item.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    });
+    files.iter().map(|item| display_path(item)).collect()
 }
 
 #[tauri::command]

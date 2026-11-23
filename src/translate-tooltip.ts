@@ -11,6 +11,18 @@ export const DEFAULT_HOVER_DELAY_MS = 350;
 /** 本地查不到时是否联网查询；默认关闭 */
 export const ONLINE_LOOKUP_KEY = "fEditor.hoverTranslateOnline";
 
+/** 悬停范围：selection=必须先选中内容；any=任意单词都能触发。默认仅选中 */
+export const HOVER_RANGE_KEY = "fEditor.hoverTranslateRange";
+export type HoverRange = "selection" | "any";
+
+export function getHoverRange(): HoverRange {
+  return localStorage.getItem(HOVER_RANGE_KEY) === "any" ? "any" : "selection";
+}
+
+export function setHoverRange(range: HoverRange): void {
+  localStorage.setItem(HOVER_RANGE_KEY, range);
+}
+
 export function isOnlineLookupEnabled(): boolean {
   return localStorage.getItem(ONLINE_LOOKUP_KEY) === "1";
 }
@@ -92,7 +104,8 @@ const isWordChar = (char: string): boolean => /[A-Za-z'’-]/.test(char);
 function phraseFromText(text: string): string | null {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (!cleaned || cleaned.length > 500) return null;
-  return cleaned.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.!?]+$/g, "") || null;
+  // 只裁掉首尾的空白与标点：中文选区的汉字必须保留，在线接口支持中译英
+  return cleaned.replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, "") || null;
 }
 
 /** 喇叭图标；发音按钮用，保持和弹窗文字同色 */
@@ -250,12 +263,16 @@ export function hoverTranslate() {
   return hoverTooltip(
     async (view, pos) => {
       if (!isHoverTranslateEnabled()) return null;
-      // 选中词组：悬停点落在选区内时翻译整个选区内容
+      // 仅选中模式：没有选区或悬停在选区外一律不弹
       const sel = view.state.selection.main;
+      const inSelection = sel.from !== sel.to && pos >= sel.from && pos <= sel.to;
+      if (!inSelection && getHoverRange() === "selection") return null;
+
+      // 选中词组：悬停点落在选区内时翻译整个选区内容
       let target: string | null = null;
       let from: number;
       let to: number;
-      if (sel.from !== sel.to && pos >= sel.from && pos <= sel.to) {
+      if (inSelection) {
         target = phraseFromText(view.state.sliceDoc(sel.from, sel.to));
         from = sel.from;
         to = sel.to;
@@ -366,6 +383,8 @@ function previewWordAt(x: number, y: number): PreviewHit | null {
       return { word: phrase, rect: sel.getRangeAt(0).getBoundingClientRect() };
     }
   }
+  // 仅选中模式：没有命中选区就不再回退到单词识别
+  if (getHoverRange() === "selection") return null;
 
   const text = node.textContent ?? "";
   let index = -1;

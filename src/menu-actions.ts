@@ -1,4 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { app } from "./app-context";
 import { ask, message, modalInput } from "./dialogs";
 import { showTransientStatus } from "./statusbar";
@@ -129,6 +130,69 @@ function terminalStartDir(): string | null {
   return tree.currentRoot;
 }
 
+/** Gitee release 的更新信息，字段与 updater.rs 的 UpdateInfo 对应 */
+interface UpdateInfo {
+  has_update: boolean;
+  current: string;
+  latest: string;
+  changelog: string;
+  download_url: string | null;
+  asset_size: number | null;
+  launcher_path: string | null;
+}
+
+/** 检查更新：有新版时下载替换启动器，重启后由新启动器解包新主程序 */
+async function checkForUpdate(): Promise<void> {
+  showTransientStatus("正在检查更新…");
+  let info: UpdateInfo;
+  try {
+    info = await invoke<UpdateInfo>("update_check");
+  } catch (error) {
+    await message(`检查更新失败：${error}`);
+    return;
+  }
+  if (!info.has_update) {
+    await message(`当前已是最新版本（${info.current}）`);
+    return;
+  }
+  // 开发模式直接运行主程序时没有启动器可替换，跳转 release 页手动下载
+  if (!info.launcher_path || !info.download_url) {
+    await message(`发现新版本 ${info.latest}，当前环境不支持自动更新，请在浏览器中手动下载`);
+    await invoke("open_release_page");
+    return;
+  }
+
+  const sizeText = info.asset_size
+    ? `（约 ${(info.asset_size / 1024 / 1024).toFixed(1)} MB）`
+    : "";
+  const choice = await ask(
+    `发现新版本 ${info.latest}${sizeText}\n\n${info.changelog || "暂无更新说明"}`,
+    [
+      { label: "下载并安装", value: "update", primary: true },
+      { label: "暂不更新", value: "cancel" },
+    ],
+  );
+  if (choice !== "update") return;
+
+  showTransientStatus("正在下载更新…");
+  try {
+    await invoke("update_download", {
+      url: info.download_url,
+      launcher: info.launcher_path,
+    });
+  } catch (error) {
+    await message(`更新失败：${error}`);
+    return;
+  }
+  const restart = await ask("更新已就绪，重启应用后生效，现在重启吗？", [
+    { label: "立即重启", value: "restart", primary: true },
+    { label: "稍后手动重启", value: "cancel" },
+  ]);
+  if (restart === "restart") {
+    await invoke("update_restart", { launcher: info.launcher_path });
+  }
+}
+
 /** 关于弹窗：版本号取自 Tauri 构建配置，避免前端再维护一份 */
 async function showAbout(): Promise<void> {
   const version = await getVersion().catch(() => "");
@@ -221,6 +285,9 @@ export async function handleMenuAction(action: string): Promise<void> {
       break;
     case "edit.block":
       deps.toggleBlockMode();
+      break;
+    case "help.update":
+      await checkForUpdate();
       break;
     case "help.about":
       await showAbout();

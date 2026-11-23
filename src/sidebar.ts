@@ -1,4 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { app } from "./app-context";
+import { openPath } from "./file-open";
 import { splitPath } from "./paths";
 import { normalizePath } from "./tabs";
 
@@ -20,6 +22,161 @@ const sidebar = document.getElementById("sidebar") as HTMLElement;
 const sidebarResizer = document.getElementById("sidebar-resizer") as HTMLDivElement;
 const rootCrumbs = document.getElementById("root-crumbs") as HTMLDivElement;
 const rootUpButton = document.getElementById("root-up") as HTMLButtonElement;
+const fileTreeHost = document.getElementById("file-tree") as HTMLDivElement;
+
+/* ---- 文件名搜索 ---- */
+
+interface SearchHit {
+  path: string;
+  name: string;
+  depth: number;
+}
+
+/** 深度下拉：值是额外下探的子目录层数，0 表示只看起点这一层 */
+const SEARCH_DEPTHS: Array<[value: string, label: string]> = [
+  ["0", "1 层"],
+  ["1", "2 层"],
+  ["2", "3 层"],
+  ["4", "5 层"],
+  ["99999", "不限"],
+];
+
+const searchWrap = document.createElement("div");
+searchWrap.className = "tree-search";
+
+const searchInput = document.createElement("input");
+searchInput.className = "tree-search-input";
+searchInput.type = "search";
+searchInput.placeholder = "搜索文件名";
+
+const depthSelect = document.createElement("select");
+depthSelect.className = "tree-search-depth";
+depthSelect.title = "搜索深度";
+for (const [value, label] of SEARCH_DEPTHS) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  depthSelect.append(option);
+}
+depthSelect.value = "0";
+
+const searchResults = document.createElement("div");
+searchResults.className = "tree-search-results";
+searchResults.hidden = true;
+
+searchWrap.append(searchInput, depthSelect);
+sidebar.insertBefore(searchWrap, fileTreeHost);
+sidebar.insertBefore(searchResults, fileTreeHost);
+
+let searchTimer: number | undefined;
+/** 请求令牌：连续输入时只认最后一次结果，避免旧结果覆盖新结果 */
+let searchToken = 0;
+let lastSearchRoot: string | null = null;
+
+/** 退出搜索并恢复目录树 */
+function resetSearch(): void {
+  searchToken += 1;
+  if (searchTimer !== undefined) {
+    window.clearTimeout(searchTimer);
+    searchTimer = undefined;
+  }
+  searchInput.value = "";
+  searchResults.replaceChildren();
+  searchResults.hidden = true;
+  fileTreeHost.hidden = false;
+}
+
+function renderSearchEmpty(text: string): void {
+  searchResults.replaceChildren();
+  const tip = document.createElement("div");
+  tip.className = "tree-search-empty";
+  tip.textContent = text;
+  searchResults.append(tip);
+  searchResults.hidden = false;
+  fileTreeHost.hidden = true;
+}
+
+async function runSearch(): Promise<void> {
+  const base = app.tree.searchBase;
+  const keyword = searchInput.value.trim();
+  if (!base || !keyword) return;
+  const token = ++searchToken;
+  try {
+    const hits = await invoke<SearchHit[]>("search_files", {
+      root: base,
+      keyword,
+      maxDepth: Number(depthSelect.value),
+    });
+    if (token !== searchToken) return;
+    renderSearchResults(hits);
+  } catch (error) {
+    if (token !== searchToken) return;
+    renderSearchEmpty(`搜索失败：${error}`);
+  }
+}
+
+function renderSearchResults(hits: SearchHit[]): void {
+  searchResults.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "tree-search-count";
+  head.textContent = hits.length > 0 ? `找到 ${hits.length} 个文件` : "没有匹配的文件";
+  searchResults.append(head);
+
+  for (const hit of hits) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "tree-search-row";
+    row.title = hit.path;
+
+    const name = document.createElement("span");
+    name.className = "tree-search-name";
+    name.textContent = hit.name;
+
+    const dir = document.createElement("span");
+    dir.className = "tree-search-dir";
+    // 展示结果所在目录，便于区分同名文件
+    const parent = hit.path.slice(0, hit.path.length - hit.name.length);
+    dir.textContent = parent.replace(/[\\/]+$/, "") || ".";
+
+    row.append(name, dir);
+    row.addEventListener("click", () => {
+      // 打开后收起搜索，让目录树恢复并定位到该文件
+      resetSearch();
+      void openPath(hit.path).then(() => app.tree.markActive(hit.path));
+    });
+    searchResults.append(row);
+  }
+  searchResults.hidden = false;
+  fileTreeHost.hidden = true;
+}
+
+function scheduleSearch(): void {
+  if (searchTimer !== undefined) window.clearTimeout(searchTimer);
+  if (!searchInput.value.trim()) {
+    resetSearch();
+    return;
+  }
+  searchTimer = window.setTimeout(() => {
+    searchTimer = undefined;
+    void runSearch();
+  }, 250);
+}
+
+searchInput.addEventListener("input", scheduleSearch);
+depthSelect.addEventListener("change", () => {
+  if (searchInput.value.trim()) void runSearch();
+});
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    resetSearch();
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    searchResults.querySelector<HTMLButtonElement>(".tree-search-row")?.click();
+  }
+});
 
 /** 展开侧栏并刷新面包屑（打开文件夹、切换工作区时用） */
 export function expandSidebar(): void {
@@ -37,6 +194,11 @@ export function collapseSidebar(): void {
 export function syncSidebar(): void {
   const { tree } = app;
   const root = tree.currentRoot;
+  // 工作区切换后，上一次的搜索结果已经没有意义
+  if (root !== lastSearchRoot) {
+    lastSearchRoot = root;
+    resetSearch();
+  }
   const visible = root !== null && !treeCollapsed;
   sidebar.hidden = !visible;
   // 拖动条与侧栏同进同退，放在 JS 里控制避免依赖 DOM 相邻顺序

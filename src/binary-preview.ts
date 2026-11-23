@@ -641,6 +641,89 @@ const PLAY_RATES = [0.75, 1, 1.25, 1.5];
 /** 兜底方案会把文件读进内存，超过这个体积就不再尝试 */
 const MEDIA_FALLBACK_LIMIT = 100 * 1024 * 1024;
 
+/**
+ * 常驻媒体容器：面板隐藏（display:none）或元素被移出文档时，
+ * WebView2 会中止媒体网络请求并抛 MEDIA_ERR_ABORTED，播放随之中断。
+ * 切标签时先把元素迁移到这里，元素始终留在文档里，只做位置搬家。
+ */
+const mediaSink = (() => {
+  const sink = document.createElement("div");
+  sink.id = "media-sink";
+  document.body.append(sink);
+  return sink;
+})();
+
+/** 把缓存的音视频元素挪进常驻容器，保证切标签时不被断流 */
+export function parkActiveMedia(): void {
+  for (const media of mediaCache.values()) {
+    if (media.parentElement !== mediaSink) mediaSink.append(media);
+  }
+}
+
+/* ---- 播放模式 ---- */
+
+export type PlayMode = "once" | "repeat-one" | "sequential" | "repeat-all";
+
+const PLAY_MODE_KEY = "fEditor.mediaPlayMode";
+const PLAY_MODES: PlayMode[] = ["once", "repeat-one", "sequential", "repeat-all"];
+const PLAY_MODE_LABELS: Record<PlayMode, string> = {
+  once: "单曲播放",
+  "repeat-one": "单曲循环",
+  sequential: "顺序播放",
+  "repeat-all": "列表循环",
+};
+
+/** 播放模式全局生效并持久化：切换标签后新播放的媒体沿用同一模式 */
+function getPlayMode(): PlayMode {
+  const saved = localStorage.getItem(PLAY_MODE_KEY) as PlayMode | null;
+  return saved && PLAY_MODES.includes(saved) ? saved : "once";
+}
+
+function setPlayMode(mode: PlayMode): void {
+  localStorage.setItem(PLAY_MODE_KEY, mode);
+}
+
+/** 顺序/列表循环需要打开下一个文件，由 preview-panel 注入 openPath */
+let navigateTo: ((path: string) => Promise<void>) | null = null;
+/** 自动切歌后待播放的路径：渲染到该文件时自动开始播放 */
+let autoplayPath: string | null = null;
+
+export function setMediaNavigator(fn: (path: string) => Promise<void>): void {
+  navigateTo = fn;
+}
+
+/** 统一路径比较口径：不同来源的路径斜杠与大小写可能不一致 */
+function samePath(a: string, b: string): boolean {
+  return a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+}
+
+/** 播放结束：按模式决定重播、切下一首还是停下 */
+async function handleMediaEnded(media: HTMLMediaElement, path: string): Promise<void> {
+  const mode = getPlayMode();
+  if (mode === "repeat-one") {
+    // 原生 loop 在个别 WebView 的分片流上不生效，这里显式重播兜底
+    media.currentTime = 0;
+    void media.play().catch(() => undefined);
+    return;
+  }
+  if (mode === "once" || !navigateTo) return;
+  try {
+    const files = await invoke<string[]>("list_audio_siblings", { path });
+    if (files.length === 0) return;
+    const index = files.findIndex((item) => samePath(item, path));
+    if (index < 0) return;
+    const next =
+      mode === "repeat-all"
+        ? files[(index + 1) % files.length]
+        : files[index + 1];
+    if (!next || samePath(next, path)) return;
+    autoplayPath = next;
+    await navigateTo(next);
+  } catch {
+    // 目录读不到时静默停止，不影响当前播放器状态
+  }
+}
+
 function mediaMime(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".m4a")) return "audio/mp4";
@@ -657,6 +740,9 @@ async function fallbackToBlob(
   path: string,
   meta: HTMLElement,
 ): Promise<void> {
+  // 兜底会重建 src 并 load()，必须记录播放状态，否则会从头开始
+  const wasPlaying = !media.paused;
+  const position = media.currentTime;
   try {
     const base64 = await invoke<string>("read_file_base64", {
       path,
@@ -666,6 +752,14 @@ async function fallbackToBlob(
     const blob = new Blob([bytes], { type: mediaMime(path) });
     media.src = URL.createObjectURL(blob);
     media.load();
+    media.addEventListener(
+      "loadedmetadata",
+      () => {
+        media.currentTime = position;
+        if (wasPlaying) void media.play().catch(() => undefined);
+      },
+      { once: true },
+    );
   } catch {
     meta.textContent = "无法播放：读取文件失败，文件可能超过 100 MB。";
     meta.classList.add("media-error");
@@ -699,6 +793,7 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
   }
   // 重新挂回 DOM 时保留 src，避免每次切标签都从头加载
   audio.style.width = "100%";
+  audio.loop = getPlayMode() === "repeat-one";
 
   const card = document.createElement("div");
   card.className = "audio-card";
@@ -720,18 +815,27 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
 
   let fellBack = false;
   audio.onerror = () => {
+    const code = audio.error?.code ?? 0;
+    // 错误码 1 是「播放被中止」：切标签迁移元素时可能触发，
+    // 属预期中断，不能走 base64 兜底（那会整篇重读并从头播放）
+    if (code === 1) return;
     // 自定义协议在个别 WebView 上会被拦，退一步用 base64 + blob 兜底
     if (!fellBack) {
       fellBack = true;
       void fallbackToBlob(audio, path, meta);
       return;
     }
-    const code = audio.error?.code ?? 0;
     meta.textContent = `无法播放：${mediaErrorReason(code)}（错误码 ${code}）。建议转成 mp3 或 m4a。`;
     meta.classList.add("media-error");
   };
 
-  buildMediaToolbar(toolbar, audio);
+  buildMediaToolbar(toolbar, audio, path);
+
+  // 顺序/列表循环自动切过来的文件：渲染完成即开始播放
+  if (autoplayPath && samePath(autoplayPath, path)) {
+    autoplayPath = null;
+    void audio.play().catch(() => undefined);
+  }
 }
 
 function renderVideo(host: HTMLElement, toolbar: HTMLElement, path: string): void {
@@ -744,6 +848,7 @@ function renderVideo(host: HTMLElement, toolbar: HTMLElement, path: string): voi
     mediaCache.set(path, video);
   }
   video.style.width = "100%";
+  video.loop = getPlayMode() === "repeat-one";
 
   const card = document.createElement("div");
   card.className = "video-card";
@@ -765,20 +870,22 @@ function renderVideo(host: HTMLElement, toolbar: HTMLElement, path: string): voi
 
   let fellBack = false;
   video.onerror = () => {
+    const code = video?.error?.code ?? 0;
+    // 同音频：错误码 1 是元素迁移引起的预期中止，不触发兜底
+    if (code === 1) return;
     if (!fellBack) {
       fellBack = true;
       void fallbackToBlob(video as HTMLVideoElement, path, meta);
       return;
     }
-    const code = video?.error?.code ?? 0;
     meta.textContent = `无法播放：${mediaErrorReason(code)}（错误码 ${code}）。建议使用 MP4（H.264/AAC）或 WebM。`;
     meta.classList.add("media-error");
   };
 
-  buildMediaToolbar(toolbar, video);
+  buildMediaToolbar(toolbar, video, path);
 }
 
-function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement): void {
+function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement, path: string): void {
   toolbar.hidden = false;
 
   const rateLabel = document.createElement("span");
@@ -799,13 +906,17 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement): void 
     return button;
   });
 
-  const loop = document.createElement("button");
-  loop.textContent = "⟲ 循环";
-  loop.title = "循环播放";
-  loop.classList.toggle("on", media.loop);
-  loop.addEventListener("click", () => {
-    media.loop = !media.loop;
-    loop.classList.toggle("on", media.loop);
+  // 播放模式按钮：点一次切到下一种，全局持久化，后续打开的媒体沿用
+  const modeButton = document.createElement("button");
+  modeButton.className = "media-mode";
+  modeButton.textContent = PLAY_MODE_LABELS[getPlayMode()];
+  modeButton.title = "播放模式：单曲播放 / 单曲循环 / 顺序播放 / 列表循环";
+  modeButton.addEventListener("click", () => {
+    const current = getPlayMode();
+    const nextMode = PLAY_MODES[(PLAY_MODES.indexOf(current) + 1) % PLAY_MODES.length];
+    setPlayMode(nextMode);
+    media.loop = nextMode === "repeat-one";
+    modeButton.textContent = PLAY_MODE_LABELS[nextMode];
   });
 
   const time = document.createElement("span");
@@ -817,6 +928,9 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement): void 
   // 用 on* 赋值而不是 addEventListener，重复渲染时不会叠加监听
   media.ontimeupdate = updateTime;
   media.onloadedmetadata = updateTime;
+  media.onended = () => {
+    void handleMediaEnded(media, path);
+  };
 
-  toolbar.replaceChildren(rateLabel, ...rateButtons, loop, time);
+  toolbar.replaceChildren(rateLabel, ...rateButtons, modeButton, time);
 }

@@ -289,6 +289,84 @@ body.resizing-y {
   color: var(--text-dim);
 }
 
+/* ---- 资源管理器文件搜索 ---- */
+.tree-search {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tree-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tree-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.tree-search-depth {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 2px 4px;
+  color: var(--text);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tree-search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.tree-search-count,
+.tree-search-empty {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tree-search-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 4px 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.tree-search-row:hover {
+  background: var(--selection);
+}
+
+.tree-search-name {
+  font-size: 12px;
+}
+
+.tree-search-dir {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 面包屑：根目录路径逐级可点，点击即把该层设为新根；
    侧栏窄时按段自动换行，不再依赖隐藏滚动条横向滚动 */
 #root-crumbs {
@@ -1091,6 +1169,20 @@ body.resizing-y {
   margin-top: 18px;
 }
 
+/* 切标签时音视频临时停靠在这里：不能 display:none 或 visibility:hidden，
+   否则 WebView2 会中止媒体请求导致播放中断 */
+#media-sink {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .video-player {
   margin-top: 14px;
   border-radius: 6px;
@@ -1115,6 +1207,11 @@ body.resizing-y {
 .media-time {
   font-size: 12px;
   color: var(--text-dim);
+}
+
+/* 播放模式按钮：文字随模式变化，比其他工具按钮宽一些 */
+#binary-toolbar .media-mode {
+  min-width: 74px;
 }
 
 .media-time {

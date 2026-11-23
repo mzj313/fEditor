@@ -1,5 +1,10 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { disposeBinaryPreview, renderBinaryPreview } from "./binary-preview";
+import {
+  disposeBinaryPreview,
+  parkActiveMedia,
+  renderBinaryPreview,
+  setMediaNavigator,
+} from "./binary-preview";
 import { message } from "./dialogs";
 import type { EditorController } from "./editor";
 import { renderMarkdown, renderMermaidDiagrams, resolveLocalImages } from "./preview";
@@ -31,6 +36,8 @@ export function initPreviewPanel(deps: {
   store = deps.store;
   editor = deps.editor;
   openPath = deps.openPath;
+  // 顺序播放 / 列表循环播完需要自动打开同目录下一个音频
+  setMediaNavigator(deps.openPath);
 }
 
 export function hidePreview(): void {
@@ -39,6 +46,9 @@ export function hidePreview(): void {
   // 文本类思维导图预览的缩放/拖动监听也一并释放
   disposeMindmap();
   if (!binaryWrap.hidden) {
+    // 先把正在播放的音视频挪到常驻容器，避免随面板 display:none 一起被隐藏，
+    // 否则 WebView2 会中止媒体请求导致播放中断
+    parkActiveMedia();
     binaryWrap.hidden = true;
     binaryToolbar.hidden = true;
     // 切回文本标签时释放 pdf.js 的 worker 和画布，避免大文件常驻内存

@@ -135,6 +135,19 @@ export class FileTree {
     void this.reveal(path);
   }
 
+  /** 搜索起点：当前文件所在目录；没有打开文件时退回工作区根 */
+  get searchBase(): string | null {
+    if (!this.root) return null;
+    if (this.activePath) {
+      const cut = Math.max(
+        this.activePath.lastIndexOf("/"),
+        this.activePath.lastIndexOf("\\"),
+      );
+      if (cut > 0) return this.activePath.slice(0, cut);
+    }
+    return this.root;
+  }
+
   private async loadDir(path: string): Promise<TreeEntry[]> {
     const cached = this.cache.get(path);
     if (cached) return cached;

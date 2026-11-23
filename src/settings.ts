@@ -18,9 +18,11 @@ import {
   DEFAULT_HOVER_DELAY_MS,
   HOVER_DELAY_OPTIONS,
   getHoverDelayMs,
+  getHoverRange,
   isHoverTranslateEnabled,
   isOnlineLookupEnabled,
   setHoverDelayMs,
+  setHoverRange,
   setHoverTranslateEnabled,
   setOnlineLookupEnabled,
 } from "./translate-tooltip";
@@ -242,6 +244,24 @@ export function openSettingsDialog(): void {
     showTransientStatus(`弹出延迟已设为 ${Number(delaySelect.value) / 1000}s`);
   });
 
+  // 悬停范围：决定必须先选中内容，还是任意单词都能悬停翻译
+  const rangeSelect = el("select", "settings-control") as HTMLSelectElement;
+  for (const [value, label] of [
+    ["selection", "仅选中内容"],
+    ["any", "任意单词"],
+  ] as const) {
+    const option = el("option", undefined, label) as HTMLOptionElement;
+    option.value = value;
+    rangeSelect.append(option);
+  }
+  rangeSelect.value = getHoverRange();
+  rangeSelect.addEventListener("change", () => {
+    setHoverRange(rangeSelect.value === "any" ? "any" : "selection");
+    // 编辑器侧需要重挂扩展才会按新模式生成 tooltip
+    window.dispatchEvent(new CustomEvent("set-translate-delay"));
+    showTransientStatus(`悬停范围：${rangeSelect.value === "any" ? "任意单词" : "仅选中内容"}`);
+  });
+
   // 在线兜底：本地词库查不到时才请求在线翻译，默认关闭
   const onlineToggle = el("input", "settings-toggle") as HTMLInputElement;
   onlineToggle.type = "checkbox";
@@ -254,11 +274,12 @@ export function openSettingsDialog(): void {
   const translateHint = el(
     "p",
     "settings-hint",
-    "编辑区与 Markdown 预览中，鼠标停在英文单词上达到弹出延迟即可看到中文释义，点弹窗右侧的喇叭可以听发音。词库与语音都走本机；开启联网查询后，本地词库查不到的词会弹出翻译框，点里面的「联网翻译」按钮才请求 MyMemory 免费接口，结果会标注「联网」。",
+    "选中文本后把鼠标停在选区上即可查看译文；词库与语音都走本机。开启联网查询后，本地查不到的内容会弹出翻译框，点「联网翻译」才请求 MyMemory 免费接口（中文自动中译英）。「悬停范围」选择「任意单词」时，不选中也能直接悬停翻译英文单词。",
   );
 
   registerCategory("translate", "翻译", [
     buildRow("悬停翻译", translateToggle),
+    buildRow("悬停范围", rangeSelect),
     buildRow("弹出延迟", delaySelect),
     buildRow("联网查询", onlineToggle),
     translateHint,
