@@ -16,12 +16,23 @@ rem Call cargo by absolute path when possible: PATH lookups can fail intermitten
 set "CARGO=cargo"
 if exist "%CARGO_BIN%\cargo.exe" set "CARGO=%CARGO_BIN%\cargo.exe"
 
-rem A running app locks the release binary, so refuse to build until it is closed
+rem A running app locks the release binary, so close it first automatically.
+rem Kill both the app process and the launcher, then re-check: only fail
+rem if something still holds the binary after the kill attempt.
 tasklist /fi "imagename eq file-editor.exe" 2>nul | find /i "file-editor.exe" >nul
 if not errorlevel 1 (
-  echo [ERROR] fEditor is running. Please close it and try again.
-  call :finish 1
-  exit /b 1
+  echo [INFO] fEditor is running. Closing it automatically ...
+  taskkill /f /im file-editor.exe >nul 2>&1
+  taskkill /f /im fEditor.exe >nul 2>&1
+  rem Give Windows a moment to release the file locks
+  timeout /t 2 /nobreak >nul
+  tasklist /fi "imagename eq file-editor.exe" 2>nul | find /i "file-editor.exe" >nul
+  if not errorlevel 1 (
+    echo [ERROR] Failed to close fEditor. Please close it manually and try again.
+    call :finish 1
+    exit /b 1
+  )
+  echo [INFO] fEditor closed.
 )
 
 echo [1/4] Building frontend into dist ...

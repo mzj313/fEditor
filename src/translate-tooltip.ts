@@ -5,7 +5,24 @@ import { invoke } from "@tauri-apps/api/core";
 import { hoverTooltip, type EditorView, type Tooltip } from "@codemirror/view";
 
 export const HOVER_TRANSLATE_KEY = "fEditor.hoverTranslate";
+/** 悬停多少毫秒后弹窗；设置面板可调 */
+export const HOVER_DELAY_KEY = "fEditor.hoverTranslateDelay";
+export const DEFAULT_HOVER_DELAY_MS = 350;
+/** 本地查不到时是否联网查询；默认关闭 */
+export const ONLINE_LOOKUP_KEY = "fEditor.hoverTranslateOnline";
 
+export function isOnlineLookupEnabled(): boolean {
+  return localStorage.getItem(ONLINE_LOOKUP_KEY) === "1";
+}
+
+export function setOnlineLookupEnabled(enabled: boolean): void {
+  localStorage.setItem(ONLINE_LOOKUP_KEY, enabled ? "1" : "0");
+  // 清空在线结果缓存；本地词库结果与开关无关，无需清理
+  onlineCache.clear();
+}
+
+/** 弹出延迟可选项，单位秒；与设置面板下拉保持一致 */
+export const HOVER_DELAY_OPTIONS = [0.1, 0.2, 0.35, 0.5, 0.8, 1, 1.5, 2];
 
 /** 默认开启；只有显式存成 "0" 才关闭 */
 export function isHoverTranslateEnabled(): boolean {
@@ -16,10 +33,20 @@ export function setHoverTranslateEnabled(enabled: boolean): void {
   localStorage.setItem(HOVER_TRANSLATE_KEY, enabled ? "1" : "0");
 }
 
+export function getHoverDelayMs(): number {
+  const raw = Number(localStorage.getItem(HOVER_DELAY_KEY));
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_HOVER_DELAY_MS;
+}
+
+export function setHoverDelayMs(ms: number): void {
+  localStorage.setItem(HOVER_DELAY_KEY, String(ms));
+}
+
 interface DictEntry {
   word: string;
   phonetic: string;
   translation: string;
+  source?: string;
 }
 
 interface Hit {
@@ -28,22 +55,45 @@ interface Hit {
   to: number;
 }
 
-const cache = new Map<string, DictEntry | null>();
+/** 本地词库结果缓存；值可为 null（表示本地查不到） */
+const localCache = new Map<string, DictEntry | null>();
+/** 在线查询成功结果缓存；失败不缓存，方便网络恢复后重试 */
+const onlineCache = new Map<string, DictEntry | null>();
 
-async function lookupWord(word: string): Promise<DictEntry | null> {
+async function lookupLocal(word: string): Promise<DictEntry | null> {
   const key = word.toLowerCase();
-  if (cache.has(key)) return cache.get(key) ?? null;
+  if (localCache.has(key)) return localCache.get(key) ?? null;
   try {
     const entry = await invoke<DictEntry | null>("dict_lookup", { word: key });
-    cache.set(key, entry ?? null);
+    localCache.set(key, entry ?? null);
     return entry ?? null;
   } catch {
-    cache.set(key, null);
+    localCache.set(key, null);
+    return null;
+  }
+}
+
+async function lookupOnline(word: string): Promise<DictEntry | null> {
+  const key = word.toLowerCase();
+  const cached = onlineCache.get(key);
+  if (cached) return cached;
+  try {
+    const entry = await invoke<DictEntry | null>("dict_lookup_online", { word: key });
+    if (entry) onlineCache.set(key, entry);
+    return entry ?? null;
+  } catch {
     return null;
   }
 }
 
 const isWordChar = (char: string): boolean => /[A-Za-z'’-]/.test(char);
+
+/** 选区文本清洗为可查询的词组：压缩空白、去首尾标点、限长；不合格返回 null */
+function phraseFromText(text: string): string | null {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned.length > 500) return null;
+  return cleaned.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.!?]+$/g, "") || null;
+}
 
 /** 喇叭图标；发音按钮用，保持和弹窗文字同色 */
 const SPEAKER_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M3 6.2h2.1l3.3-2.6a.55.55 0 0 1 .9.43v7.94a.55.55 0 0 1-.9.43L5.1 9.8H3a.55.55 0 0 1-.55-.55v-2.5A.55.55 0 0 1 3 6.2Z"/><path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" d="M11.1 5.4a3.6 3.6 0 0 1 0 5.2M12.8 3.7a6 6 0 0 1 0 8.6"/></svg>`;
@@ -90,10 +140,8 @@ function wordAt(view: EditorView, pos: number): Hit | null {
   };
 }
 
-function buildDom(entry: DictEntry): HTMLDivElement {
-  const dom = document.createElement("div");
-  dom.className = "cm-translate-tooltip";
-
+/** 往已有容器填充弹窗内容；在线查询成功后复用同一容器刷新，避免事件监听丢失 */
+function fillDom(dom: HTMLDivElement, entry: DictEntry): void {
   const head = document.createElement("div");
   head.className = "cm-translate-head";
   const word = document.createElement("span");
@@ -105,6 +153,13 @@ function buildDom(entry: DictEntry): HTMLDivElement {
     phonetic.className = "cm-translate-phonetic";
     phonetic.textContent = `/${entry.phonetic}/`;
     head.append(phonetic);
+  }
+  // 在线兜底结果标注来源，和本地词库区分
+  if (entry.source === "online") {
+    const badge = document.createElement("span");
+    badge.className = "cm-translate-badge";
+    badge.textContent = "联网";
+    head.append(badge);
   }
 
   const speak = document.createElement("button");
@@ -126,6 +181,57 @@ function buildDom(entry: DictEntry): HTMLDivElement {
   body.className = "cm-translate-body";
   body.textContent = entry.translation;
 
+  dom.replaceChildren(head, body);
+}
+
+function buildDom(entry: DictEntry): HTMLDivElement {
+  const dom = document.createElement("div");
+  dom.className = "cm-translate-tooltip";
+  fillDom(dom, entry);
+  return dom;
+}
+
+/**
+ * 本地查不到且开启联网时的占位弹窗：只显示单词和「联网翻译」按钮，
+ * 点击后才真正请求在线翻译，成功就地把弹窗刷新成完整释义。
+ */
+function buildPendingDom(word: string, onLoaded: (entry: DictEntry) => void): HTMLDivElement {
+  const dom = document.createElement("div");
+  dom.className = "cm-translate-tooltip";
+
+  const head = document.createElement("div");
+  head.className = "cm-translate-head";
+  const wordSpan = document.createElement("span");
+  wordSpan.className = "cm-translate-word";
+  wordSpan.textContent = word;
+  head.append(wordSpan);
+
+  const body = document.createElement("div");
+  body.className = "cm-translate-body";
+
+  const fetchButton = document.createElement("button");
+  fetchButton.type = "button";
+  fetchButton.className = "cm-translate-fetch";
+  fetchButton.textContent = "联网翻译";
+  fetchButton.addEventListener("mousedown", (event) => event.preventDefault());
+  fetchButton.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    fetchButton.disabled = true;
+    fetchButton.textContent = "查询中…";
+    const entry = await lookupOnline(word);
+    if (!entry) {
+      // 查询失败恢复按钮，允许重试
+      fetchButton.disabled = false;
+      fetchButton.textContent = "联网翻译";
+      return;
+    }
+    // 编辑器弹窗与预览弹窗分别通过回调完成刷新
+    fillDom(dom, entry);
+    onLoaded(entry);
+  });
+  body.append(fetchButton);
+
   dom.append(head, body);
   return dom;
 }
@@ -144,13 +250,39 @@ export function hoverTranslate() {
   return hoverTooltip(
     async (view, pos) => {
       if (!isHoverTranslateEnabled()) return null;
-      const hit = wordAt(view, pos);
-      if (!hit) return null;
-      const entry = await lookupWord(hit.word);
-      if (!entry) return null;
-      return { ...buildTooltip(entry), pos: hit.from, end: hit.to };
+      // 选中词组：悬停点落在选区内时翻译整个选区内容
+      const sel = view.state.selection.main;
+      let target: string | null = null;
+      let from: number;
+      let to: number;
+      if (sel.from !== sel.to && pos >= sel.from && pos <= sel.to) {
+        target = phraseFromText(view.state.sliceDoc(sel.from, sel.to));
+        from = sel.from;
+        to = sel.to;
+      } else {
+        const hit = wordAt(view, pos);
+        if (!hit) return null;
+        target = hit.word;
+        from = hit.from;
+        to = hit.to;
+      }
+      if (!target) return null;
+
+      const entry = await lookupLocal(target);
+      if (entry) {
+        return { ...buildTooltip(entry), pos: from, end: to };
+      }
+      // 本地查不到且开启联网：弹出占位框，由用户手动点按钮查询
+      if (!isOnlineLookupEnabled()) return null;
+      return {
+        pos: from,
+        end: to,
+        create() {
+          return { dom: buildPendingDom(target as string, () => {}) };
+        },
+      };
     },
-    { hoverTime: 350 },
+    { hoverTime: getHoverDelayMs() },
   );
 }
 
@@ -226,6 +358,15 @@ function previewWordAt(x: number, y: number): PreviewHit | null {
   if (!point) return null;
 
   const { node, offset } = point;
+  // 选中词组：鼠标落在选区内时翻译整个选区内容，弹窗定位到选区矩形
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.containsNode(node, true)) {
+    const phrase = phraseFromText(sel.toString());
+    if (phrase) {
+      return { word: phrase, rect: sel.getRangeAt(0).getBoundingClientRect() };
+    }
+  }
+
   const text = node.textContent ?? "";
   let index = -1;
   if (offset > 0 && isWordChar(text[offset - 1] ?? "")) index = offset - 1;
@@ -246,15 +387,8 @@ function previewWordAt(x: number, y: number): PreviewHit | null {
   return { word: text.slice(start, end), rect: range.getBoundingClientRect() };
 }
 
-function showPreviewTip(entry: DictEntry, rect: DOMRect): void {
-  disposePreviewTip();
-  const tip = document.createElement("div");
-  tip.className = "preview-translate-tooltip";
-  tip.append(buildDom(entry));
-  tip.addEventListener("mouseenter", cancelPreviewHide);
-  tip.addEventListener("mouseleave", schedulePreviewHide);
-  document.body.append(tip);
-
+/** 把弹窗定位到单词矩形下方；放不下时翻到上方 */
+function positionTip(tip: HTMLDivElement, rect: DOMRect): void {
   const width = tip.offsetWidth;
   const height = tip.offsetHeight;
   const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
@@ -262,6 +396,38 @@ function showPreviewTip(entry: DictEntry, rect: DOMRect): void {
     rect.bottom + 8 + height > window.innerHeight ? Math.max(8, rect.top - height - 8) : rect.bottom + 8;
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
+}
+
+function attachPreviewBehavior(tip: HTMLDivElement): void {
+  tip.addEventListener("mouseenter", cancelPreviewHide);
+  tip.addEventListener("mouseleave", schedulePreviewHide);
+}
+
+function showPreviewTip(entry: DictEntry, rect: DOMRect): void {
+  disposePreviewTip();
+  const tip = document.createElement("div");
+  tip.className = "preview-translate-tooltip";
+  tip.append(buildDom(entry));
+  attachPreviewBehavior(tip);
+  document.body.append(tip);
+  positionTip(tip, rect);
+  previewTip = tip;
+}
+
+/** 本地查不到且开启联网时的占位弹窗：点击「联网翻译」后才请求在线结果 */
+function showPendingTip(word: string, rect: DOMRect): void {
+  disposePreviewTip();
+  const tip = document.createElement("div");
+  tip.className = "preview-translate-tooltip";
+  tip.append(
+    buildPendingDom(word, (entry) => {
+      // 查询成功后换成完整释义弹窗；重建以恢复隐藏延迟与定位
+      showPreviewTip(entry, rect);
+    }),
+  );
+  attachPreviewBehavior(tip);
+  document.body.append(tip);
+  positionTip(tip, rect);
   previewTip = tip;
 }
 
@@ -283,10 +449,16 @@ function onPreviewMove(event: MouseEvent): void {
   const token = ++previewToken;
   previewTimer = window.setTimeout(async () => {
     previewTimer = undefined;
-    const entry = await lookupWord(hit.word);
-    if (!entry || token !== previewToken) return;
-    showPreviewTip(entry, hit.rect);
-  }, 350);
+    if (token !== previewToken) return;
+    const entry = await lookupLocal(hit.word);
+    if (entry) {
+      showPreviewTip(entry, hit.rect);
+      return;
+    }
+    // 本地查不到且开启联网：弹占位框，由用户手动点按钮查询
+    if (!isOnlineLookupEnabled()) return;
+    showPendingTip(hit.word, hit.rect);
+  }, getHoverDelayMs());
 }
 
 /** 让 Markdown / SVG 预览也支持悬停翻译；预览内容会重建，监听挂在外层容器上 */

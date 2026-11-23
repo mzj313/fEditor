@@ -29,6 +29,8 @@ const languageCompartment = new Compartment();
 const searchCompartment = new Compartment();
 const readOnlyCompartment = new Compartment();
 const themeCompartment = new Compartment();
+/** 悬停翻译用独立 compartment，设置里改弹出延迟后可即时生效 */
+const hoverTranslateCompartment = new Compartment();
 
 /** 类似 Sublime 默认配色（Monokai）：深灰底 + 粉/绿/黄/紫的高对比色 */
 const darkHighlight = HighlightStyle.define([
@@ -185,7 +187,7 @@ export class EditorController {
       wrapCompartment.of(EditorView.lineWrapping),
       languageCompartment.of([]),
       searchCompartment.of([]),
-      hoverTranslate(),
+      hoverTranslateCompartment.of(hoverTranslate()),
       readOnlyCompartment.of(readOnly ? EditorState.readOnly.of(true) : []),
       keymap.of([
         { key: "Mod-Shift-l", run: () => this.splitLinesIntoCursors() },
@@ -248,6 +250,13 @@ export class EditorController {
   setWrap(on: boolean): void {
     this.view.dispatch({
       effects: wrapCompartment.reconfigure(on ? EditorView.lineWrapping : []),
+    });
+  }
+
+  /** 更新悬停翻译弹出延迟；重挂扩展让新 hoverTime 立即生效 */
+  setHoverTranslate(): void {
+    this.view.dispatch({
+      effects: hoverTranslateCompartment.reconfigure(hoverTranslate()),
     });
   }
 

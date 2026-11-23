@@ -17,11 +17,12 @@ pub fn speak_word(word: String) -> Result<(), String> {
     imp::speak(&text)
 }
 
-/// 只接受英文单词。词典条目本身就是这种形式，这里再收一次口，
+/// 只接受英文单词或词组。词典条目与选区翻译都是这种形式，这里再收一次口，
 /// 避免把任意文本原样交给系统命令。
 fn sanitize(word: &str) -> Result<String, String> {
     let text = word.trim();
-    if text.is_empty() || text.len() > 64 {
+    // 词组翻译场景选区可达数百字符，与在线接口上限保持一致
+    if text.is_empty() || text.len() > 500 {
         return Err("没有可朗读的内容".into());
     }
     if !text

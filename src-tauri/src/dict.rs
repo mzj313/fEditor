@@ -23,6 +23,8 @@ pub struct DictEntry {
     word: String,
     phonetic: String,
     translation: String,
+    /// 结果来源：local 本地词库 / online 在线查询
+    source: &'static str,
 }
 
 fn table() -> &'static HashMap<String, DictEntry> {
@@ -51,6 +53,7 @@ fn table() -> &'static HashMap<String, DictEntry> {
                     word: entry.w,
                     phonetic: entry.p,
                     translation: entry.t,
+                    source: "local",
                 },
             );
         }
@@ -96,6 +99,68 @@ pub fn dict_lookup(word: String) -> Option<DictEntry> {
         }
     }
     None
+}
+
+/// 在线查询用的响应结构（只取需要的字段）
+#[derive(Deserialize)]
+struct MyMemoryResponse {
+    #[serde(rename = "responseData")]
+    data: Option<MyMemoryData>,
+    #[serde(rename = "responseStatus")]
+    status: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct MyMemoryData {
+    #[serde(rename = "translatedText")]
+    text: Option<String>,
+}
+
+/// 本地词典查不到时的可选回退：请求 MyMemory 免费接口做英译中。
+/// 支持单词和选区词组；超时 5 秒，任何失败都返回 None，前端静默不弹窗。
+#[tauri::command]
+pub fn dict_lookup_online(word: String) -> Option<DictEntry> {
+    let key = normalize(&word);
+    // MyMemory 单次查询上限 500 字符
+    if key.is_empty() || key.len() > 500 {
+        return None;
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    // 词组含空格等字符，必须走 query 参数自动 URL 编码，不能手动拼 URL
+    let response: MyMemoryResponse = client
+        .get("https://api.mymemory.translated.net/get")
+        .query(&[("q", key.as_str()), ("langpair", "en|zh-CN")])
+        .send()
+        .ok()?
+        .text()
+        .ok()
+        .and_then(|body| serde_json::from_str(&body).ok())?;
+
+    // responseStatus 可能是数字或字符串，统一按文本判断
+    let status_ok = match &response.status {
+        serde_json::Value::Number(n) => n.as_i64() == Some(200),
+        serde_json::Value::String(s) => s == "200",
+        _ => false,
+    };
+    let text = response.data?.text?.trim().to_string();
+    if !status_ok || text.is_empty() {
+        return None;
+    }
+    // 免费配额耗尽时接口仍返回 200，但译文里带警告文案，需要拦掉
+    if text.contains("MYMEMORY WARNING") || text.contains("QUERY LENGTH LIMIT") {
+        return None;
+    }
+
+    Some(DictEntry {
+        word: key,
+        phonetic: String::new(),
+        translation: text,
+        source: "online",
+    })
 }
 
 #[cfg(test)]

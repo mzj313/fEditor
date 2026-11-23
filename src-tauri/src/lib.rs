@@ -332,6 +332,7 @@ pub fn run() {
             clipboard::clipboard_read,
             clipboard::clipboard_write,
             dict::dict_lookup,
+            dict::dict_lookup_online,
             speech::speak_word,
         ])
         .run(tauri::generate_context!())

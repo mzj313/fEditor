@@ -1730,6 +1730,37 @@ body.resizing-y {
   opacity: 0.6;
 }
 
+/* 在线兜底结果的来源徽标 */
+.cm-translate-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  opacity: 0.75;
+  border: 1px solid currentColor;
+}
+
+/* 本地查不到时的「联网翻译」手动触发按钮 */
+.cm-translate-fetch {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  /* 容器整体是 pointer-events: none，按钮要单独放行才能点 */
+  pointer-events: auto;
+}
+.cm-translate-fetch:hover {
+  opacity: 0.8;
+}
+.cm-translate-fetch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* 弹窗整体不接收鼠标事件，只有喇叭按钮例外，避免挡住下面的正文 */
 .cm-translate-speak {
   display: inline-flex;

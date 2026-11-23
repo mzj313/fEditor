@@ -14,8 +14,14 @@ import {
 } from "./shortcuts";
 import { showTransientStatus } from "./statusbar";
 import {
+  DEFAULT_HOVER_DELAY_MS,
+  HOVER_DELAY_OPTIONS,
+  getHoverDelayMs,
   isHoverTranslateEnabled,
+  isOnlineLookupEnabled,
+  setHoverDelayMs,
   setHoverTranslateEnabled,
+  setOnlineLookupEnabled,
 } from "./translate-tooltip";
 
 const FAMILY_KEY = "fEditor.editorFontFamily";
@@ -220,14 +226,40 @@ export function openSettingsDialog(): void {
     showTransientStatus(translateToggle.checked ? "悬停翻译已开启" : "悬停翻译已关闭");
   });
 
+  // 弹出延迟：改下拉即时生效，编辑器侧通过事件重挂翻译扩展
+  const delaySelect = el("select", "settings-control") as HTMLSelectElement;
+  for (const seconds of HOVER_DELAY_OPTIONS) {
+    const option = el("option", undefined, `${seconds}s`) as HTMLOptionElement;
+    option.value = String(seconds * 1000);
+    delaySelect.append(option);
+  }
+  delaySelect.value = String(getHoverDelayMs());
+  if (delaySelect.selectedIndex === -1) delaySelect.value = String(DEFAULT_HOVER_DELAY_MS);
+  delaySelect.addEventListener("change", () => {
+    setHoverDelayMs(Number(delaySelect.value));
+    window.dispatchEvent(new CustomEvent("set-translate-delay", { detail: Number(delaySelect.value) }));
+    showTransientStatus(`弹出延迟已设为 ${Number(delaySelect.value) / 1000}s`);
+  });
+
+  // 在线兜底：本地词库查不到时才请求在线翻译，默认关闭
+  const onlineToggle = el("input", "settings-toggle") as HTMLInputElement;
+  onlineToggle.type = "checkbox";
+  onlineToggle.checked = isOnlineLookupEnabled();
+  onlineToggle.addEventListener("change", () => {
+    setOnlineLookupEnabled(onlineToggle.checked);
+    showTransientStatus(onlineToggle.checked ? "联网查询已开启" : "联网查询已关闭");
+  });
+
   const translateHint = el(
     "p",
     "settings-hint",
-    "编辑区与 Markdown 预览中，鼠标停在英文单词上约 0.35 秒即可看到中文释义，点弹窗右侧的喇叭可以听发音。词库与语音都走本机，完全离线，不会上传任何内容。",
+    "编辑区与 Markdown 预览中，鼠标停在英文单词上达到弹出延迟即可看到中文释义，点弹窗右侧的喇叭可以听发音。词库与语音都走本机；开启联网查询后，本地词库查不到的词会弹出翻译框，点里面的「联网翻译」按钮才请求 MyMemory 免费接口，结果会标注「联网」。",
   );
 
   registerCategory("translate", "翻译", [
     buildRow("悬停翻译", translateToggle),
+    buildRow("弹出延迟", delaySelect),
+    buildRow("联网查询", onlineToggle),
     translateHint,
   ]);
 

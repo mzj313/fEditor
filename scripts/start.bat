@@ -13,11 +13,13 @@ if not exist "%CARGO%" set "CARGO=cargo"
 rem Only the release configuration is used: the window always shows the
 rem latest code. Debug/dev mode is intentionally not offered here.
 
+rem A running instance would block the rebuild, so close it first and restart
 tasklist /fi "imagename eq file-editor.exe" 2>nul | find /i "file-editor.exe" >nul
 if not errorlevel 1 (
-  echo [ERROR] fEditor is running. Please close it and try again.
-  pause
-  exit /b 1
+  echo [INFO] fEditor is running. Closing it before restart ...
+  taskkill /f /im file-editor.exe >nul 2>&1
+  rem Give Windows a moment to release the exe lock
+  timeout /t 1 /nobreak >nul
 )
 
 set "EXE=%~dp0..\src-tauri\target\release\file-editor.exe"

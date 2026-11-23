@@ -151,6 +151,11 @@ window.addEventListener("set-wrap", (event) => {
   editor.setWrap(app.wrapEnabled);
 });
 
+// 设置面板修改悬停翻译弹出延迟：让编辑器重挂翻译扩展立即生效
+window.addEventListener("set-translate-delay", () => {
+  editor.setHoverTranslate();
+});
+
 // 设置面板切换主题：与视图菜单共用同一套状态与联动（编辑器/终端配色）
 window.addEventListener("set-theme", (event) => {
   const next = (event as CustomEvent<"light" | "dark">).detail;
