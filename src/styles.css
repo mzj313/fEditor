@@ -465,6 +465,15 @@ body.resizing-y {
   color: var(--text-dim);
 }
 
+/* JSON 折叠指示符：可折叠行显示 chevron，悬停高亮，点击收缩/展开 */
+#editor-host .cm-foldGutter .cm-gutterElement {
+  cursor: pointer;
+  opacity: 0.45;
+}
+#editor-host .cm-foldGutter .cm-gutterElement:hover {
+  opacity: 1;
+}
+
 /* WebView2 下选区默认几乎没有底色，双击选词后看不出选中范围，
    这里显式给未聚焦与聚焦两种状态都上色 */
 #editor-host .cm-selectionBackground {
@@ -492,7 +501,7 @@ body.resizing-y {
   min-height: 0;
 }
 
-/* Markdown 目录独立在窗口左侧：预览时出现，可隐藏、可拖动调宽 */
+/* 文档目录独立在窗口左侧：预览时出现，可隐藏、可拖动调宽 */
 #preview-toc {
   flex: 0 0 var(--toc-width);
   width: var(--toc-width);

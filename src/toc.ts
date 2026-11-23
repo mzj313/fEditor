@@ -52,7 +52,7 @@ export function toggleToc(): void {
   syncTocVisibility();
 }
 
-/** Markdown 目录：扫描预览区的 h1~h6 构建 */
+/** Markdown 临时目录：扫描预览区的 h1~h6 构建 */
 export function buildToc(): void {
   const headings = Array.from(
     previewHost.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"),

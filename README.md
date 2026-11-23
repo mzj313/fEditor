@@ -310,8 +310,10 @@ Windows 单文件打包与右键菜单注册：
 
 ```bash
 scripts\build-single.bat            # 生成 dist-build\fEditor.exe，并刷新固定启动器
-scripts\register-context-menu.bat   # 注册资源管理器右键菜单
+scripts\register-context-menu.bat   # 注册资源管理器右键菜单（也可在 设置 → 集成 里开关）
 ```
+
+右键菜单的推荐方式是应用内开关：设置 → 集成 → 资源管理器右键菜单。开关只写当前用户注册表（HKCU），无需管理员；注册的是启动器 `%LOCALAPPDATA%\fEditor\fEditor.exe`，所以更新代码后右键打开的也是最新版本。命令行脚本仍保留，适合批量部署的场景。
 
 任务栏固定：固定 `%LOCALAPPDATA%\fEditor\fEditor.exe`。这是构建脚本每次都会覆盖的单文件启动器，点击后先启动它、再由它解包最新主程序，所以代码更新后不需要重新固定。不要固定窗口运行时指向的 `%LOCALAPPDATA%\fEditor\rt\file-editor.exe`——那只是启动器解包出来的副本，自己不会更新。
 

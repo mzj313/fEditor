@@ -28,6 +28,11 @@ fn run() -> Result<(), String> {
 
     let mut command = Command::new(&app_path);
     command.current_dir(&dir);
+    // 告知主程序启动器自身位置：设置里的右键菜单必须注册启动器，
+    // 注册解包出来的主程序会让更新后仍打开旧副本
+    if let Ok(exe) = std::env::current_exe() {
+        command.env("FEDITOR_LAUNCHER", exe);
+    }
     // 作为「打开方式」的目标程序时，文件路径是通过命令行传进来的，
     // 必须原样转交主程序，否则双击文件只会打开一个空窗口
     for arg in forwarded_args() {

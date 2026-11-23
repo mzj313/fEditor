@@ -107,7 +107,7 @@ export async function showPreview(tab: Tab): Promise<void> {
     }
     previewWrap.hidden = false;
     editorHost.hidden = true;
-    // 导图没有标题层级，左侧 Markdown 目录一并隐藏
+    // 导图没有标题层级，左侧目录一并隐藏
     syncTocVisibility();
     updateStatus();
     return;

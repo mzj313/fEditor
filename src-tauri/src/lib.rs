@@ -4,6 +4,7 @@ mod fs_service;
 mod media;
 mod print_service;
 mod session;
+mod shell_integration;
 mod speech;
 mod terminal;
 
@@ -216,7 +217,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
             &MenuItem::with_id(
                 app,
                 "view.toc",
-                "Markdown 目录",
+                "文档目录",
                 true,
                 Some("CmdOrCtrl+Shift+M"),
             )?,
@@ -269,6 +270,22 @@ pub fn run() {
     // （之后调用会返回失败，任务栏仍按 exe 路径归组）
     set_app_user_model_id(APP_USER_MODEL_ID);
     tauri::Builder::default()
+        // 单实例插件必须最先注册：第二个进程启动时会转交参数并自行退出，
+        // 本实例收到事件后把文件/目录转给前端打开
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            let argv: Vec<String> = args.iter().skip(1).cloned().collect();
+            let payload = serde_json::json!({
+                "files": fs_service::files_from_args(&argv),
+                "dir": fs_service::dir_from_args(&argv),
+            });
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.emit("second-instance-args", payload);
+                // 已最小化或被遮挡时把窗口带回来
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         // 只恢复位置、大小和最大化状态：可见性由前端控制，
         // 一旦被插件恢复成可见，就会出现首帧白屏
@@ -323,6 +340,8 @@ pub fn run() {
             print_service::print_capture,
             session::load_session,
             session::save_session,
+            shell_integration::context_menu_status,
+            shell_integration::set_context_menu,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,

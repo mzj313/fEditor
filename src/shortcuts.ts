@@ -40,7 +40,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "view.tree": "资源管理器",
   "view.terminal": "集成终端",
   "view.preview": "切换预览",
-  "view.toc": "Markdown 目录",
+  "view.toc": "文档目录",
   "edit.find": "查找",
   "edit.replace": "替换",
   "format.bold": "加粗",

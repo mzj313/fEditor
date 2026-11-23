@@ -341,6 +341,18 @@ async function boot(): Promise<void> {
     await listen<PrintResultPayload>("print-pdf-done", (event) => {
       void handlePrintDone(event.payload);
     });
+    // 单实例：右键再次打开文件/文件夹时，参数由已运行实例接手
+    await listen<{ files: string[]; dir: string | null }>("second-instance-args", async (event) => {
+      const { files, dir } = event.payload;
+      if (dir) {
+        await tree.setRoot(dir, true).then((opened) => {
+          if (opened) syncSidebar();
+        });
+      }
+      for (const path of files) {
+        await openPath(path, true);
+      }
+    });
   } catch (error) {
     console.warn("注册菜单事件失败", error);
   }

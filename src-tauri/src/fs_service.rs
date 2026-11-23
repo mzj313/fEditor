@@ -508,31 +508,41 @@ pub fn read_file_base64(
     Ok(encode_base64(&bytes))
 }
 
-#[tauri::command]
-pub fn cli_files() -> Vec<String> {
-    std::env::args()
-        .skip(1)
+/// 从命令行参数中提取要打开的文件；带 `-` 前缀的按标志位跳过。
+/// 单实例插件转交第二实例参数时也走这里，保持与启动时一致的行为。
+pub fn files_from_args(args: &[String]) -> Vec<String> {
+    args.iter()
         .filter(|arg| !arg.starts_with('-'))
         .filter(|arg| Path::new(arg).is_file())
         .map(|arg| arg.replace('\\', "/"))
         .collect()
 }
 
-/// 右键菜单传入的目录：资源管理器在文件夹/空白处右键时用 `%1` / `%V`
+/// 从命令行参数中提取目录：资源管理器在文件夹/空白处右键时用 `%1` / `%V`
 /// 传入点击位置，启动时用它作为工作区根目录，而不是回到上次的文件夹。
-#[tauri::command]
-pub fn cli_dir() -> Option<String> {
-    std::env::args()
-        .skip(1)
+pub fn dir_from_args(args: &[String]) -> Option<String> {
+    args.iter()
         .filter(|arg| !arg.starts_with('-'))
         .find_map(|arg| {
-            let path = Path::new(&arg);
+            let path = Path::new(arg);
             if !path.is_dir() {
                 return None;
             }
             let canonical = fs::canonicalize(path).ok()?;
             Some(display_path(&canonical))
         })
+}
+
+#[tauri::command]
+pub fn cli_files() -> Vec<String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    files_from_args(&args)
+}
+
+#[tauri::command]
+pub fn cli_dir() -> Option<String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    dir_from_args(&args)
 }
 
 #[tauri::command]

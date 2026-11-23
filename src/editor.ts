@@ -11,10 +11,10 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from "@codemirror/commands";
-import { StreamLanguage, bracketMatching, HighlightStyle, defaultHighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import { StreamLanguage, bracketMatching, HighlightStyle, defaultHighlightStyle, indentOnInput, syntaxHighlighting, foldGutter, foldService } from "@codemirror/language";
 import { highlightSelectionMatches } from "@codemirror/search";
 import { tags } from "@lezer/highlight";
-import { jsonLanguage } from "./json-lang";
+import { jsonLanguage, jsonFoldService } from "./json-lang";
 import { openFindDialog } from "./find-dialog";
 import { searchModule } from "./search";
 import { hoverTranslate } from "./translate-tooltip";
@@ -275,7 +275,14 @@ export class EditorController {
 
   /** JSON 高亮不依赖额外包，直接同步 reconfigure 即可。 */
   ensureJson(): void {
-    this.view.dispatch({ effects: languageCompartment.reconfigure(jsonLanguage) });
+    // 挂上折叠 gutter 与括号配对的折叠服务，让 JSON 左侧行号可收缩展开
+    this.view.dispatch({
+      effects: languageCompartment.reconfigure([
+        jsonLanguage,
+        foldGutter(),
+        foldService.of(jsonFoldService),
+      ]),
+    });
   }
 
   /** YAML 用官方语法包，动态加载以减小首屏体积。 */
