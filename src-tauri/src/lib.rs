@@ -169,7 +169,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
             &MenuItem::with_id(
                 app,
                 "format.code",
-                "代码块",
+                "行内代码",
                 true,
                 Some("CmdOrCtrl+Alt+C"),
             )?,
@@ -231,7 +231,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         "设置",
         true,
         &[
-            &MenuItem::with_id(app, "settings.open", "编辑器设置…", true, None::<&str>)?,
+            &MenuItem::with_id(app, "settings.open", "编辑器设置…", true, Some("CmdOrCtrl+Comma"))?,
         ],
     )?;
 

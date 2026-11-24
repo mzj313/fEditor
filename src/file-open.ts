@@ -75,6 +75,35 @@ export async function openPath(path: string, activateAfter = true, record = fals
   scheduleSessionSave(buildSession);
 }
 
+/** 顺序播放 / 列表循环切歌：复用当前音频标签，避免每首歌都新开一个页签 */
+export async function openMediaReplacingCurrent(path: string): Promise<void> {
+  const { store } = app;
+  const normalized = normalizePath(path);
+  const existing = store.tabs.find(
+    (tab) => tab.path && normalizePath(tab.path) === normalized,
+  );
+  if (existing) {
+    await activate(existing.id);
+    return;
+  }
+
+  const current = store.active;
+  // 当前标签不是音频预览时（比如用户已切走）退化成普通打开
+  if (!current || current.binary !== "audio" || !current.path) {
+    await openPath(path);
+    return;
+  }
+
+  // 先停掉上一首，否则旧音频会与新文件同时出声
+  disposeBinaryTab(current.path);
+  current.path = path;
+  current.title = basename(path);
+  current.loaded = true;
+  deps.renderTabs();
+  await activate(current.id);
+  scheduleSessionSave(buildSession);
+}
+
 /** PDF / Word / 图片 / 音频只进只读预览标签，不读文本、不建编辑器状态 */
 async function openBinaryTab(
   path: string,

@@ -26,18 +26,25 @@ const binaryToolbar = document.getElementById("binary-toolbar") as HTMLDivElemen
 let store: TabStore | null = null;
 let editor: EditorController | null = null;
 let openPath: ((path: string) => Promise<void>) | null = null;
+let openMedia: ((path: string) => Promise<void>) | null = null;
 
 /** 依赖在 main.ts 里创建完成后注入，避免模块间循环 import */
 export function initPreviewPanel(deps: {
   store: TabStore;
   editor: EditorController;
   openPath: (path: string) => Promise<void>;
+  /** 顺序播放 / 列表循环切歌：由外部决定是复用当前标签还是新开 */
+  openMedia: (path: string) => Promise<void>;
 }): void {
   store = deps.store;
   editor = deps.editor;
   openPath = deps.openPath;
-  // 顺序播放 / 列表循环播完需要自动打开同目录下一个音频
-  setMediaNavigator(deps.openPath);
+  openMedia = deps.openMedia;
+  // 顺序播放 / 列表循环播完需要自动切到同目录下一个音频
+  setMediaNavigator((path) => {
+    const navigate = openMedia;
+    return navigate ? navigate(path) : Promise.resolve();
+  });
 }
 
 export function hidePreview(): void {

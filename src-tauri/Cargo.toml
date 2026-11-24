@@ -1,6 +1,6 @@
 [package]
 name = "file-editor"
-version = "1.1.0"
+version = "1.1.1"
 description = "Sublime 风格的轻量文本编辑器"
 authors = ["mzj"]
 edition = "2024"
