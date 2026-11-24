@@ -687,6 +687,87 @@ body.resizing-y {
   background: transparent;
 }
 
+/* 画板：占满预览区，去掉正文留白，纸张外沿用底色衬出 */
+#preview-host:has(.whiteboard) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.whiteboard {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-soft);
+}
+
+.whiteboard-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.whiteboard-swatches {
+  display: flex;
+  gap: 5px;
+}
+
+.whiteboard-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.whiteboard-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.whiteboard-widths {
+  display: flex;
+  gap: 5px;
+}
+
+.whiteboard-width,
+.whiteboard-eraser,
+.whiteboard-clear {
+  padding: 2px 9px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.whiteboard-width.active,
+.whiteboard-eraser.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 手绘画布：铺满剩余空间，光标改成十字方便定位落笔点 */
+.whiteboard-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  outline: none;
+  cursor: crosshair;
+}
+
+.whiteboard-stage svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 #preview-host h1,
 #preview-host h2,
 #preview-host h3,
@@ -926,6 +1007,35 @@ body.resizing-y {
   margin: 0 0 16px;
   white-space: pre-wrap;
   line-height: 1.6;
+}
+
+/* 帮助 → 功能说明：分组列表，内容超出视口时在弹窗内滚动 */
+.features-guide {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  white-space: normal;
+}
+
+.features-version {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.features-section {
+  margin: 12px 0 4px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.features-guide ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.features-guide li {
+  margin: 2px 0;
+  line-height: 1.5;
 }
 
 #modal-actions {
@@ -1926,5 +2036,194 @@ body.resizing-y {
   /* 需要接收鼠标才能点喇叭；离开后由脚本延迟收起 */
   pointer-events: auto;
 }
+
+/* ---------------- 文本对比面板 ---------------- */
+.diff-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.diff-card {
+  width: min(1180px, 94vw);
+  height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  color: var(--text);
+}
+
+.diff-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.diff-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.diff-close {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.diff-close:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+/* 左右栏头：等宽并排，中间用 1px 底色充当分隔线 */
+.diff-pane-heads {
+  display: flex;
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-pane-head {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+}
+
+.diff-pane-title {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.diff-file-label {
+  font-size: 12px;
+  color: var(--accent);
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.diff-pick {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diff-pick:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 编辑态：两个文本域并排撑满剩余高度 */
+.diff-editors {
+  display: flex;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--border);
+}
+
+.diff-input {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--editor-font-family, Consolas, monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 4;
+}
+
+/* 结果态：面板主体就是一个滚动容器 */
+.diff-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--editor-font-family, Consolas, monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.diff-empty {
+  padding: 18px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+/* 四列网格：左侧文本 | 左行号 ‖ 右行号 | 右侧文本，行号列夹在中间 */
+.diff-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 52px minmax(0, 1fr);
+}
+
+.diff-row > div {
+  padding: 1px 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 行号列紧贴中间，用一条竖线把左右两栏分开（与截图一致） */
+.diff-row > .diff-no:nth-child(3) {
+  border-left: 1px solid var(--border);
+  text-align: left;
+}
+
+.diff-no {
+  text-align: right;
+  color: var(--text-dim);
+  user-select: none;
+  opacity: 0.75;
+}
+
+/* 删除行偏红、新增行偏绿；修改行的左右两格各取一边 */
+.diff-del-line {
+  background: rgba(248, 81, 73, 0.16);
+}
+
+.diff-add-line {
+  background: rgba(46, 160, 67, 0.18);
+}
+
 
 

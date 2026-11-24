@@ -22,6 +22,8 @@ export interface Tab {
   pendingCursor: number | null;
   /** 二进制只读预览类型；为空表示普通文本标签 */
   binary?: BinaryKind;
+  /** 画板标签：SVG 文本 + 可视化手绘画布 */
+  canvas?: boolean;
 }
 
 let seq = 0;
@@ -39,7 +41,8 @@ export function nextUntitledTitle(): string {
 
 /** 恢复会话时同步计数器，避免新标签与已有「未命名-N」重名 */
 export function noteUntitledTitle(title: string): void {
-  const matched = /^未命名-(\d+)$/.exec(title);
+  // 画板等带扩展名的草稿（未命名-3.svg）同样要占号，否则重启后会重名
+  const matched = /^未命名-(\d+)(\.[^.]+)?$/.exec(title);
   if (matched) untitled = Math.max(untitled, Number(matched[1]));
 }
 
@@ -134,6 +137,7 @@ export function createTab(partial: Partial<Tab> = {}): Tab {
     langApplied: partial.langApplied ?? false,
     pendingCursor: partial.pendingCursor ?? null,
     binary: partial.binary,
+    canvas: partial.canvas,
   };
 }
 

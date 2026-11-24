@@ -17,10 +17,13 @@ import {
   basename,
   binaryKindOf,
   createTab,
+  isSvg,
+  nextUntitledTitle,
   normalizePath,
   type BinaryKind,
   type Tab,
 } from "./tabs";
+import { isWhiteboardText, WHITEBOARD_SKELETON } from "./whiteboard";
 import { expandSidebar } from "./sidebar";
 import { saveTab } from "./tab-save";
 import type { OpenMode } from "./file-tree";
@@ -67,7 +70,13 @@ export async function openPath(path: string, activateAfter = true, record = fals
 
   const tab = createTab({ path: payload.path, loaded: true });
   applyPayload(tab, payload);
-  defaultPreview(tab);
+  // 画板保存的 svg 带标记，重新打开后继续以可视化画板编辑
+  if (isSvg(tab.title) && isWhiteboardText(payload.content)) {
+    tab.canvas = true;
+    tab.preview = true;
+  } else {
+    defaultPreview(tab);
+  }
   store.add(tab);
   if (record) addRecent(payload.path);
   deps.renderTabs();
@@ -202,6 +211,24 @@ export function newTab(): void {
   store.add(tab);
   tab.state = editor.createState("");
   tab.savedText = "";
+  deps.renderTabs();
+  void activate(tab.id);
+}
+
+/** 新建画板：内容就是一份空 SVG，保存后成为标准 svg 文件 */
+export function newWhiteboard(): void {
+  const { store, editor } = app;
+  const tab = createTab({
+    loaded: true,
+    title: `${nextUntitledTitle()}.svg`,
+    preview: true,
+    canvas: true,
+  });
+  store.add(tab);
+  tab.state = editor.createState(WHITEBOARD_SKELETON);
+  // 骨架只存在于内存，用户没保存过，标签应显示为未保存状态
+  tab.savedText = "";
+  tab.dirty = true;
   deps.renderTabs();
   void activate(tab.id);
 }

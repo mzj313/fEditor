@@ -7,6 +7,7 @@ const STORE_KEY = "fEditor.shortcuts";
 /** 各菜单动作的默认组合键，key 与 Rust 菜单项 id 一致 */
 export const DEFAULT_SHORTCUTS: Record<string, string> = {
   "file.new": "Ctrl+N",
+  "file.canvas": "Ctrl+Shift+N",
   "file.open": "Ctrl+O",
   "folder.open": "Ctrl+Shift+O",
   "file.save": "Ctrl+S",
@@ -15,6 +16,7 @@ export const DEFAULT_SHORTCUTS: Record<string, string> = {
   "view.terminal": "Ctrl+T",
   "view.preview": "Ctrl+E",
   "view.toc": "Ctrl+Shift+M",
+  "view.diff": "Ctrl+Shift+D",
   "settings.open": "Ctrl+,",
   "edit.find": "Ctrl+F",
   "edit.replace": "Ctrl+H",
@@ -36,6 +38,7 @@ export const DEFAULT_SHORTCUTS: Record<string, string> = {
 /** 设置面板里展示的中文名称 */
 export const ACTION_LABELS: Record<string, string> = {
   "file.new": "新建",
+  "file.canvas": "新建画板",
   "file.open": "打开文件",
   "folder.open": "打开文件夹",
   "file.save": "保存",
@@ -44,6 +47,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "view.terminal": "集成终端",
   "view.preview": "切换预览",
   "view.toc": "文档目录",
+  "view.diff": "文本对比",
   "settings.open": "编辑器设置",
   "edit.find": "查找",
   "edit.replace": "替换",

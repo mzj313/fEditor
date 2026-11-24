@@ -15,6 +15,7 @@ import { activeText } from "./session-state";
 import { showTransientStatus, updateStatus } from "./statusbar";
 import { isMarkdown, isSvg, isCsv, type Tab, type TabStore } from "./tabs";
 import { buildToc, syncTocVisibility } from "./toc";
+import { renderWhiteboard } from "./whiteboard";
 
 const editorHost = document.getElementById("editor-host") as HTMLDivElement;
 const previewWrap = document.getElementById("preview-wrap") as HTMLDivElement;
@@ -125,6 +126,16 @@ export async function showPreview(tab: Tab): Promise<void> {
     previewWrap.hidden = false;
     editorHost.hidden = true;
     // 导图没有标题层级，左侧目录一并隐藏
+    syncTocVisibility();
+    updateStatus();
+    return;
+  }
+
+  // 画板标签：SVG 文本驱动的手绘画布，必须在普通 SVG 预览之前分流
+  if (tab.canvas) {
+    renderWhiteboard(previewHost, tab);
+    previewWrap.hidden = false;
+    editorHost.hidden = true;
     syncTocVisibility();
     updateStatus();
     return;

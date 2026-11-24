@@ -13,6 +13,8 @@ export interface SessionTab {
   scrollTop: number;
   /** PDF / Word / 图片 / 音视频预览标签，只记路径，不存内容 */
   binary?: "pdf" | "docx" | "image" | "audio" | "video" | "mind";
+  /** 画板标签：恢复时保持可视化绘制模式 */
+  canvas?: boolean;
 }
 
 /** 未命名草稿：没有磁盘路径，内容只能随会话保存，重启后原样恢复 */
@@ -22,6 +24,7 @@ export interface SessionDraft {
   text: string;
   cursor: number;
   scrollTop: number;
+  canvas?: boolean;
 }
 
 export interface SessionData {

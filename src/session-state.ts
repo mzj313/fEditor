@@ -58,6 +58,7 @@ export function buildSession(): SessionData {
       cursor: tab.state ? tab.state.selection.main.head : tab.pendingCursor ?? 0,
       scrollTop: tab.id === storeRef.activeId ? editorRef.scrollTop : tab.scrollTop,
       binary: tab.binary,
+      canvas: tab.canvas,
     }));
 
   // 未命名草稿没有磁盘路径，内容只能随会话保存，否则重启后就会丢失
@@ -69,6 +70,7 @@ export function buildSession(): SessionData {
       text: tab.state ? tab.state.doc.toString() : tab.savedText,
       cursor: tab.state ? tab.state.selection.main.head : tab.pendingCursor ?? 0,
       scrollTop: tab.id === storeRef.activeId ? editorRef.scrollTop : tab.scrollTop,
+      canvas: tab.canvas,
     }));
 
   const activeVisible =

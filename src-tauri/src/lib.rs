@@ -88,6 +88,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         true,
         &[
             &MenuItem::with_id(app, "file.new", "新建", true, Some("CmdOrCtrl+N"))?,
+            &MenuItem::with_id(app, "file.canvas", "新建画板", true, Some("CmdOrCtrl+Shift+N"))?,
             &MenuItem::with_id(app, "file.open", "打开文件…", true, Some("CmdOrCtrl+O"))?,
             &MenuItem::with_id(
                 app,
@@ -222,6 +223,14 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+Shift+M"),
             )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "view.diff",
+                "文本对比…",
+                true,
+                Some("CmdOrCtrl+Shift+D"),
+            )?,
         ],
     )?;
 
@@ -241,6 +250,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         "帮助",
         true,
         &[
+            &MenuItem::with_id(app, "help.features", "功能说明", true, None::<&str>)?,
             &MenuItem::with_id(app, "help.update", "检查更新", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "help.about", "关于 fEditor", true, None::<&str>)?,

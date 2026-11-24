@@ -12,8 +12,9 @@ import { openSettingsDialog } from "./settings";
 import { printActiveMarkdown, togglePreview } from "./preview-panel";
 import { saveTab } from "./tab-save";
 import { cycleTab } from "./tab-lifecycle";
-import { ensureEditMode, newTab, openFiles, openFolder } from "./file-open";
+import { ensureEditMode, newTab, newWhiteboard, openFiles, openFolder } from "./file-open";
 import { showRecentPopover } from "./recent-popover";
+import { openDiffDialog } from "./diff-view";
 import { comboFromEvent, DEFAULT_SHORTCUTS, getShortcut } from "./shortcuts";
 import { isJson, isToml, isYaml } from "./tabs";
 
@@ -194,6 +195,97 @@ async function checkForUpdate(): Promise<void> {
 }
 
 /** 关于弹窗：版本号取自 Tauri 构建配置，避免前端再维护一份 */
+/** 帮助 → 功能说明：按功能分组列出当前版本支持的能力 */
+async function showFeatures(): Promise<void> {
+  const version = await getVersion().catch(() => "");
+  const sections: Array<[string, string[]]> = [
+    [
+      "文件与标签",
+      [
+        "多标签编辑；Ctrl+N 新建空白标签，未命名标签首次保存默认 .txt",
+        "通过文件菜单打开的文件与文件夹会记入最近记录，最多 10 条",
+        "关闭后自动恢复上次会话，包括未保存草稿与各标签的预览状态",
+        "重复打开文件或文件夹会转交到已运行的窗口，不会多开实例",
+      ],
+    ],
+    [
+      "编辑",
+      [
+        "Markdown、JSON、YAML、TOML、SVG 等语法高亮",
+        "查找 Ctrl+F、替换 Ctrl+H；JSON 行号栏可折叠代码块",
+        "列块模式 Ctrl+Alt+B；格式化文档 Ctrl+Alt+J",
+        "文本对比 Ctrl+Shift+D：左右两栏可选文件或直接粘贴文本",
+        "所有菜单动作的快捷键可在设置中自定义",
+      ],
+    ],
+    [
+      "预览",
+      [
+        "Markdown 实时预览与文档目录，Ctrl+E 切换编辑与预览",
+        "CSV / TSV 默认以表格预览打开，可切回文本编辑",
+        "Word 预览支持左侧标题目录；PDF、图片、音视频直接预览",
+        "Markdown 打印预览可导出 PDF",
+      ],
+    ],
+    [
+      "媒体播放",
+      [
+        "支持单曲播放、单曲循环、顺序播放、列表循环四种模式",
+        "切换标签不会中断播放，进度与播放状态保持",
+        "顺序 / 列表循环自动播放同目录的下一个音频，复用同一个标签",
+      ],
+    ],
+    [
+      "翻译",
+      [
+        "悬停范围可选：仅选中内容，或任意单词",
+        "弹出延迟可调，范围 0.1 ~ 2 秒",
+        "内置离线英汉词典；未收录的词可手动点击联网翻译，支持中译英",
+        "选中多个词可整体翻译词组，并可朗读",
+      ],
+    ],
+    [
+      "资源管理器与终端",
+      [
+        "工作区文件树，自动忽略 node_modules、.git 等目录",
+        "文件名搜索，可指定搜索层数，结果在当前标签打开",
+        "集成终端；Git 状态与提交前的改动清单按状态分色显示",
+        "设置中可一键注册资源管理器右键菜单，无需管理员权限",
+      ],
+    ],
+    [
+      "设置与更新",
+      [
+        "浅色 / 深色主题，可跟随系统",
+        "帮助 → 检查更新：下载新版本并替换，重启后生效",
+      ],
+    ],
+  ];
+
+  const wrap = document.createElement("div");
+  wrap.className = "features-guide";
+  const intro = document.createElement("div");
+  intro.className = "features-version";
+  intro.textContent = `fEditor${version ? ` ${version}` : ""} 功能说明`;
+  wrap.append(intro);
+
+  for (const [title, items] of sections) {
+    const heading = document.createElement("div");
+    heading.className = "features-section";
+    heading.textContent = title;
+    wrap.append(heading);
+    const list = document.createElement("ul");
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.textContent = item;
+      list.append(li);
+    }
+    wrap.append(list);
+  }
+
+  await ask(wrap, [{ label: "知道了", value: "ok", primary: true }]);
+}
+
 async function showAbout(): Promise<void> {
   const version = await getVersion().catch(() => "");
   const lines = [
@@ -232,6 +324,10 @@ export async function handleMenuAction(action: string): Promise<void> {
     case "file.new":
       // 新建未命名标签，可直接输入纯文本；首次保存时默认 .txt 扩展名
       newTab();
+      break;
+    case "file.canvas":
+      // 新建画板：内容为 SVG，预览面板变成手绘涂鸦画布
+      newWhiteboard();
       break;
     case "file.open":
       await openFiles();
@@ -280,11 +376,17 @@ export async function handleMenuAction(action: string): Promise<void> {
     case "view.preview":
       await togglePreview();
       break;
+    case "view.diff":
+      openDiffDialog();
+      break;
     case "settings.open":
       openSettingsDialog();
       break;
     case "edit.block":
       deps.toggleBlockMode();
+      break;
+    case "help.features":
+      await showFeatures();
       break;
     case "help.update":
       await checkForUpdate();
@@ -316,7 +418,13 @@ export function bindShortcuts(): void {
   window.addEventListener("keydown", (event) => {
     const target = event.target as HTMLElement | null;
     // 焦点在集成终端、输入弹窗或查找弹框里时，按键属于该控件本身，不能被编辑器快捷键拦截
-    if (target?.closest?.(".xterm") || target === modalInput || target?.closest?.(".find-card"))
+    if (
+      target?.closest?.(".xterm") ||
+      target === modalInput ||
+      target?.closest?.(".find-card") ||
+      // 文本对比面板里的文本域同样需要原生按键行为（Ctrl+A/C/V/F 等）
+      target?.closest?.(".diff-backdrop")
+    )
       return;
 
     const action = menuShortcuts[comboFromEvent(event)];

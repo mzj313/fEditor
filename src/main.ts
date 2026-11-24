@@ -387,6 +387,7 @@ async function boot(): Promise<void> {
           pendingCursor: saved.cursor ?? 0,
           preview: isMarkdown(title) || isSvg(title) || isCsv(title),
           binary,
+          canvas: saved.canvas === true,
           loaded: Boolean(binary),
         }),
       );
@@ -401,6 +402,8 @@ async function boot(): Promise<void> {
           savedText: draft.text,
           scrollTop: draft.scrollTop ?? 0,
           pendingCursor: draft.cursor ?? 0,
+          preview: draft.canvas === true,
+          canvas: draft.canvas === true,
           loaded: false,
         }),
       );
