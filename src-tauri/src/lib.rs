@@ -1,6 +1,8 @@
 mod clipboard;
+mod desktop_lyrics;
 mod dict;
 mod fs_service;
+mod http_client;
 mod media;
 mod print_service;
 mod session;
@@ -98,7 +100,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 Some("CmdOrCtrl+Shift+O"),
             )?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "file.recent", "最近…", true, None::<&str>)?,
+            &MenuItem::with_id(app, "file.recent", "最近…", true, Some("CmdOrCtrl+Alt+R"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "file.save", "保存", true, Some("CmdOrCtrl+S"))?,
             &MenuItem::with_id(
@@ -106,7 +108,15 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 "file.print",
                 "打印预览",
                 true,
-                Some("CmdOrCtrl+P"),
+                Some("CmdOrCtrl+Alt+P"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "file.reopen",
+                "重新打开关闭的标签",
+                true,
+                Some("CmdOrCtrl+Shift+T"),
             )?,
         ],
     )?;
@@ -127,6 +137,13 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "edit.find", "查找", true, Some("CmdOrCtrl+F"))?,
             &MenuItem::with_id(app, "edit.replace", "替换", true, Some("CmdOrCtrl+H"))?,
+            &MenuItem::with_id(
+                app,
+                "edit.findInFiles",
+                "在文件中查找…",
+                true,
+                Some("CmdOrCtrl+Shift+F"),
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "edit.block", "列块模式", true, Some("CmdOrCtrl+Alt+B"))?,
         ],
@@ -138,7 +155,13 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         true,
         &[
             &MenuItem::with_id(app, "format.bold", "加粗", true, Some("CmdOrCtrl+B"))?,
-            &MenuItem::with_id(app, "format.italic", "斜体", true, Some("CmdOrCtrl+I"))?,
+            &MenuItem::with_id(
+                app,
+                "format.italic",
+                "斜体",
+                true,
+                Some("CmdOrCtrl+Alt+I"),
+            )?,
             &MenuItem::with_id(
                 app,
                 "format.strike",
@@ -223,13 +246,56 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+Shift+M"),
             )?,
-            &PredefinedMenuItem::separator(app)?,
+        ],
+    )?;
+
+    // 工具类功能（对比、调试等）统一收进这里，视图菜单只保留显示/隐藏开关
+    let tools_menu = Submenu::with_items(
+        app,
+        "工具",
+        true,
+        &[
             &MenuItem::with_id(
                 app,
-                "view.diff",
+                "tools.diff",
                 "文本对比…",
                 true,
                 Some("CmdOrCtrl+Shift+D"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tools.http",
+                "HTTP 调试…",
+                true,
+                Some("CmdOrCtrl+Shift+H"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tools.encoding",
+                "编码转换箱…",
+                true,
+                Some("CmdOrCtrl+Shift+G"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tools.regex",
+                "正则测试器…",
+                true,
+                Some("CmdOrCtrl+Shift+R"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tools.color",
+                "取色器…",
+                true,
+                Some("CmdOrCtrl+Shift+K"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tools.lyrics",
+                "桌面歌词",
+                true,
+                Some("CmdOrCtrl+Alt+Y"),
             )?,
         ],
     )?;
@@ -240,7 +306,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         "设置",
         true,
         &[
-            &MenuItem::with_id(app, "settings.open", "编辑器设置…", true, Some("CmdOrCtrl+Comma"))?,
+            &MenuItem::with_id(app, "settings.open", "设置…", true, Some("CmdOrCtrl+Comma"))?,
         ],
     )?;
 
@@ -265,6 +331,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
             &file_menu,
             &edit_menu,
             &format_menu,
+            &tools_menu,
             &view_menu,
             &settings_menu,
             &help_menu,
@@ -273,9 +340,21 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
     #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(
         app,
-        &[&file_menu, &edit_menu, &format_menu, &view_menu, &settings_menu, &help_menu],
+        &[
+            &file_menu,
+            &edit_menu,
+            &format_menu,
+            &tools_menu,
+            &view_menu,
+            &settings_menu,
+            &help_menu,
+        ],
     )?;
-    app.set_menu(menu)?;
+    // 只挂到主窗口：app.set_menu 会把菜单应用到之后创建的每个窗口，
+    // 桌面歌词小窗会莫名其妙多出一条菜单栏并挤占显示区域
+    if let Some(main) = app.get_webview_window("main") {
+        main.set_menu(menu)?;
+    }
     Ok(())
 }
 
@@ -336,22 +415,38 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let _ = app.emit("menu-action", event.id().as_ref().to_string());
         })
+        // 主窗口销毁后直接退出：桌面歌词等附属窗口不应让进程继续留在后台
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             fs_service::read_file,
             fs_service::read_file_base64,
+            fs_service::save_asset,
+            fs_service::read_file_with_encoding,
             fs_service::save_file,
             fs_service::path_exists,
+            fs_service::create_entry,
+            fs_service::rename_entry,
+            fs_service::delete_entry,
             fs_service::cli_files,
             fs_service::cli_dir,
             fs_service::list_audio_siblings,
+            fs_service::find_lyrics,
+            desktop_lyrics::toggle_desktop_lyrics,
+            desktop_lyrics::set_desktop_lyrics_size,
             fs_service::pick_open_files,
             fs_service::pick_save_path,
             fs_service::pick_open_folder,
             fs_service::set_root,
             fs_service::read_tree,
             fs_service::search_files,
+            fs_service::search_content,
             fs_service::inspect_path,
             fs_service::write_startup_log,
+            http_client::http_send,
             print_service::print_markdown,
             print_service::print_take_job,
             print_service::print_capture,

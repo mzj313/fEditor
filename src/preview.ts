@@ -52,6 +52,14 @@ export async function renderMarkdown(text: string): Promise<string> {
   return renderer.render(text);
 }
 
+/**
+ * 空闲时预热渲染器：提前完成 markdown-it / DOMPurify 的按需加载，
+ * 首次打开 Markdown 预览时少等一次（约百 KB 的）动态 import。
+ */
+export function warmMarkdownRenderer(): void {
+  if (!rendererPromise) rendererPromise = createRenderer();
+}
+
 /** mermaid 只用到这两个方法，单独声明避免把整个包的类型都引进来。 */
 interface MermaidApi {
   initialize(config: Record<string, unknown>): void;

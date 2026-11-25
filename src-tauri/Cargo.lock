@@ -1047,6 +1047,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-web-kit",
  "portable-pty",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

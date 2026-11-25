@@ -29,6 +29,9 @@ let editor: EditorController | null = null;
 let openPath: ((path: string) => Promise<void>) | null = null;
 let openMedia: ((path: string) => Promise<void>) | null = null;
 
+/** 预览缓存上限：超大文档不缓存，避免整页 HTML 常驻内存 */
+const PREVIEW_CACHE_LIMIT = 4 * 1024 * 1024;
+
 /** 依赖在 main.ts 里创建完成后注入，避免模块间循环 import */
 export function initPreviewPanel(deps: {
   store: TabStore;
@@ -90,6 +93,15 @@ export async function showBinary(tab: Tab): Promise<void> {
   // 可见性只由 activate 同步决定：这里再改一次会让旧的异步渲染
   // 在切走之后把预览面板重新翻出来
   await renderBinaryPreview(binaryHost, binaryToolbar, tab.path, tab.binary);
+}
+
+/** 顺序播放换歌：标签路径已被外部改写，直接重渲染媒体面板 */
+export async function refreshBinaryView(tab: Tab): Promise<void> {
+  if (!tab.binary || !tab.path) return;
+  if (store && store.activeId !== tab.id) return;
+  showBinaryPanel();
+  await renderBinaryPreview(binaryHost, binaryToolbar, tab.path, tab.binary);
+  updateStatus();
 }
 
 export async function showPreview(tab: Tab): Promise<void> {
@@ -160,6 +172,22 @@ export async function showPreview(tab: Tab): Promise<void> {
   }
 
   const text = activeText(tab);
+
+  // 切回内容未变的文档时直接复用上次结果，跳过 sanitize、mermaid 与图片读取
+  if (
+    tab.previewCacheHtml &&
+    tab.previewCacheText === text &&
+    tab.previewCachePath === tab.path
+  ) {
+    previewHost.innerHTML = tab.previewCacheHtml;
+    buildToc();
+    previewWrap.hidden = false;
+    editorHost.hidden = true;
+    syncTocVisibility();
+    updateStatus();
+    return;
+  }
+
   const html = await renderMarkdown(text);
   if (store && store.activeId !== tab.id) return;
 
@@ -173,7 +201,18 @@ export async function showPreview(tab: Tab): Promise<void> {
   await resolveLocalImages(staging, tab.path);
   if (store && store.activeId !== tab.id) return;
 
+  // 先取出成品 HTML 再清空 staging，供下次切换直接复用
+  const rendered = staging.innerHTML;
   previewHost.replaceChildren(...Array.from(staging.childNodes));
+  if (rendered.length <= PREVIEW_CACHE_LIMIT) {
+    tab.previewCacheHtml = rendered;
+    tab.previewCacheText = text;
+    tab.previewCachePath = tab.path;
+  } else {
+    tab.previewCacheHtml = undefined;
+    tab.previewCacheText = undefined;
+    tab.previewCachePath = undefined;
+  }
   buildToc();
   previewWrap.hidden = false;
   editorHost.hidden = true;

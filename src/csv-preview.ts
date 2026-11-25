@@ -101,7 +101,14 @@ export function parseCsv(text: string): CsvTable {
   return { rows, delimiter, totalRows: rows.length };
 }
 
-/** 把解析结果渲染成表格：首行作表头（sticky 固定），超出上限截断并提示 */
+/** 分隔符的可读名称，用于顶部统计文案 */
+function delimiterLabel(ch: string): string {
+  if (ch === "\t") return "制表符";
+  if (ch === ";") return "分号";
+  return "逗号";
+}
+
+/** 把解析结果渲染成表格：顶部概览 + 首行表头（sticky）+ 行号列 */
 export function renderCsvPreview(host: HTMLElement, text: string): void {
   const table = parseCsv(text);
   if (table.rows.length === 0) {
@@ -112,16 +119,30 @@ export function renderCsvPreview(host: HTMLElement, text: string): void {
     return;
   }
 
+  // 列数取所有行最大值：残缺行也要补齐单元格，否则表格边框会错位
+  const columns = table.rows.reduce((max, row) => Math.max(max, row.length), 0);
+
   const wrap = document.createElement("div");
   wrap.className = "csv-preview";
+
+  const summary = document.createElement("div");
+  summary.className = "csv-summary";
+  const delimiter = delimiterLabel(table.delimiter);
+  summary.textContent = `共 ${table.totalRows} 行 × ${columns} 列 · 分隔符：${delimiter}`;
+  wrap.appendChild(summary);
+
   const el = document.createElement("table");
   el.className = "csv-table";
 
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const cell of table.rows[0]) {
+  const corner = document.createElement("th");
+  corner.className = "csv-rownum";
+  corner.textContent = "#";
+  headRow.appendChild(corner);
+  for (let column = 0; column < columns; column++) {
     const th = document.createElement("th");
-    th.textContent = cell;
+    th.textContent = table.rows[0][column] ?? "";
     headRow.appendChild(th);
   }
   head.appendChild(headRow);
@@ -129,15 +150,19 @@ export function renderCsvPreview(host: HTMLElement, text: string): void {
 
   const body = document.createElement("tbody");
   const shown = table.rows.slice(1, MAX_ROWS);
-  for (const row of shown) {
+  shown.forEach((row, index) => {
     const tr = document.createElement("tr");
-    for (const cell of row) {
+    const num = document.createElement("td");
+    num.className = "csv-rownum";
+    num.textContent = String(index + 1);
+    tr.appendChild(num);
+    for (let column = 0; column < columns; column++) {
       const td = document.createElement("td");
-      td.textContent = cell;
+      td.textContent = row[column] ?? "";
       tr.appendChild(td);
     }
     body.appendChild(tr);
-  }
+  });
   el.appendChild(body);
   wrap.appendChild(el);
 

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>桌面歌词</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      }
+
+      /* 整条歌词带都是拖动区域 */
+      .lyrics {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        padding: 8px 16px;
+        text-align: center;
+        /* 颜色与整体透明度由右键菜单调整 */
+        color: var(--lyric-color, #ffffff);
+        opacity: var(--lyric-opacity, 1);
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+        border-radius: 12px;
+        cursor: move;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      /* 鼠标移入时显示窗口轮廓，方便确认可拖动范围；菜单打开时保持轮廓 */
+      .lyrics:hover,
+      body.menu-open .lyrics {
+        outline: 1px dashed rgba(255, 255, 255, 0.4);
+        outline-offset: -2px;
+        background: rgba(0, 0, 0, 0.12);
+      }
+
+      .current {
+        /* 字号由滚轮调整，写进 CSS 变量后当前句与下一句按比例缩放 */
+        font-size: var(--lyric-size, 26px);
+        font-weight: 600;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+      }
+
+      .next {
+        font-size: calc(var(--lyric-size, 26px) * 0.58);
+        opacity: 0.65;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+      }
+
+      /* 刚开启时的短暂提示：避免歌词为空时整窗透明，看起来像没反应 */
+      .status {
+        font-size: 13px;
+        opacity: 0.6;
+        white-space: nowrap;
+      }
+
+      .status:empty {
+        display: none;
+      }
+
+      /* 右上角关闭按钮：平时半透明，悬停才明显，避免干扰歌词 */
+      .close {
+        position: fixed;
+        top: 4px;
+        right: 6px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.35);
+        color: #ffffff;
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.25;
+        transition: opacity 0.15s ease;
+        z-index: 20;
+      }
+
+      .close:hover {
+        opacity: 0.9;
+        background: rgba(220, 60, 60, 0.85);
+      }
+
+      /* 右键菜单：固定宽度，不随歌词窗口尺寸变化 */
+      .menu {
+        position: fixed;
+        z-index: 30;
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        box-sizing: border-box;
+        width: 190px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(24, 24, 24, 0.94);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+        color: #e8e8e8;
+        font-size: 12px;
+        cursor: default;
+      }
+
+      .menu.open {
+        display: flex;
+      }
+
+      .menu-colors {
+        display: flex;
+        gap: 8px;
+      }
+
+      .dot {
+        width: 14px;
+        height: 14px;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        border-radius: 50%;
+        background: var(--dot);
+        cursor: pointer;
+      }
+
+      .dot.active {
+        border-color: #ffffff;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+      }
+
+      .menu-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .menu-value {
+        width: 34px;
+        text-align: right;
+        opacity: 0.75;
+      }
+
+      .opacity {
+        flex: 1;
+        accent-color: #8ab4ff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button class="close" id="close" title="关闭桌面歌词">×</button>
+    <div class="menu" id="menu">
+      <div class="menu-colors" id="colors">
+        <button class="dot" data-color="#ffffff" style="--dot: #ffffff" title="白色"></button>
+        <button class="dot" data-color="#ffe066" style="--dot: #ffe066" title="黄色"></button>
+        <button class="dot" data-color="#66e0ff" style="--dot: #66e0ff" title="青色"></button>
+        <button class="dot" data-color="#7cf29c" style="--dot: #7cf29c" title="绿色"></button>
+        <button class="dot" data-color="#ff8ac2" style="--dot: #ff8ac2" title="粉色"></button>
+      </div>
+      <div class="menu-row">
+        <span>字号</span>
+        <input class="opacity" id="size" type="range" min="16" max="48" step="1" />
+        <span class="menu-value" id="size-value">26px</span>
+      </div>
+      <div class="menu-row">
+        <span>透明度</span>
+        <input class="opacity" id="opacity" type="range" min="30" max="100" step="5" />
+        <span class="menu-value" id="opacity-value">100%</span>
+      </div>
+      <div class="menu-row">
+        <span>宽度</span>
+        <input class="opacity" id="width" type="range" min="300" max="2000" step="20" />
+        <span class="menu-value" id="width-value">760</span>
+      </div>
+      <div class="menu-row">
+        <span>高度</span>
+        <input class="opacity" id="height" type="range" min="140" max="500" step="10" />
+        <span class="menu-value" id="height-value">140</span>
+      </div>
+    </div>
+    <div class="lyrics" data-tauri-drag-region>
+      <div class="current" id="current" data-tauri-drag-region></div>
+      <div class="next" id="next" data-tauri-drag-region></div>
+      <div class="status" id="status" data-tauri-drag-region></div>
+    </div>
+    <script type="module" src="/src/desktop-lyrics.ts"></script>
+  </body>
+</html>

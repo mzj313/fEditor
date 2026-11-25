@@ -9,6 +9,7 @@
     <div id="app">
       <header id="tabbar">
         <div id="tabs"></div>
+        <button id="editor-max" title="最大化编辑区（Ctrl+Alt+M）">⤢</button>
         <button id="new-tab" title="新建标签（Ctrl/Cmd+N）">＋</button>
       </header>
 
@@ -26,11 +27,21 @@
             <div id="binary-toolbar" hidden></div>
             <div id="binary-host"></div>
           </div>
+          <!-- 插件面板：插件宿主按需挂载，内嵌在编辑区底部，可拖动调高 -->
+          <section id="plugin-panel" hidden>
+            <div id="plugin-resizer" title="拖动调整面板高度"></div>
+            <header id="plugin-head">
+              <span id="plugin-title"></span>
+              <button id="plugin-close" title="关闭面板">×</button>
+            </header>
+            <div id="plugin-host"></div>
+          </section>
           <!-- 终端放在工作区列内部：资源管理器保持到底，不被终端横切 -->
           <section id="terminal-panel" hidden>
             <div id="terminal-resizer" title="拖动调整终端高度"></div>
             <header id="terminal-head">
               <span id="terminal-title">终端</span>
+              <button id="terminal-max" title="最大化终端（双击标题栏也可切换）">⤢</button>
               <button id="terminal-close" title="关闭终端">×</button>
             </header>
             <div id="terminal-host"></div>

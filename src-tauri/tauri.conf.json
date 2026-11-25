@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "fEditor",
@@ -22,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: feditor-media: http://feditor-media.localhost; media-src 'self' blob: feditor-media: http://feditor-media.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost feditor-media: http://feditor-media.localhost ws://localhost:1420 http://localhost:1420; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src feditor-media: http://feditor-media.localhost",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: feditor-media: http://feditor-media.localhost; media-src 'self' blob: feditor-media: http://feditor-media.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost feditor-media: http://feditor-media.localhost ws://localhost:1420 http://localhost:1420; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src feditor-media: http://feditor-media.localhost blob:",
       "dangerousDisableAssetCspModification": ["style-src"]
     }
   },

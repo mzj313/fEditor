@@ -24,6 +24,10 @@ export interface Tab {
   binary?: BinaryKind;
   /** 画板标签：SVG 文本 + 可视化手绘画布 */
   canvas?: boolean;
+  /** Markdown 预览缓存：内容与路径都没变时直接复用，跳过整页重渲染 */
+  previewCacheHtml?: string;
+  previewCacheText?: string;
+  previewCachePath?: string | null;
 }
 
 let seq = 0;

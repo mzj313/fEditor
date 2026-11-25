@@ -1,4 +1,5 @@
 import type { Window } from "@tauri-apps/api/window";
+import { showContextMenu } from "./context-menu";
 import type { EditorController } from "./editor";
 import { changeFontSize, getFontSize, onFontSizeChange, resetFontSize } from "./font-size";
 import { languageOf, type TabStore } from "./tabs";
@@ -42,6 +43,62 @@ export function initStatusBar(deps: {
     { passive: false },
   );
   stFont.addEventListener("click", () => resetFontSize());
+
+  // 编码 / 换行做成可点击项：具体动作交给 tab-encoding 模块，这里只负责弹菜单
+  const dispatch = (name: string, detail?: string) =>
+    window.dispatchEvent(new CustomEvent(name, { detail }));
+
+  stEncoding.title = "点击切换编码（按新编码重新读取文件）";
+  stEol.title = "点击切换换行风格（保存时生效）";
+  stEncoding.classList.add("status-clickable");
+  stEol.classList.add("status-clickable");
+
+  stEncoding.addEventListener("click", (event) => {
+    const tab = store?.active;
+    if (!tab || tab.binary || !tab.path) return;
+    const tick = (value: string) => (tab.encoding === value ? " ✓" : "");
+    showContextMenu(event.clientX, event.clientY, [
+      {
+        type: "item",
+        label: `UTF-8${tick("UTF-8")}`,
+        action: () => dispatch("set-tab-encoding", "UTF-8"),
+      },
+      {
+        type: "item",
+        label: `GBK${tick("GBK")}`,
+        action: () => dispatch("set-tab-encoding", "GBK"),
+      },
+      {
+        type: "item",
+        label: `GB18030${tick("GB18030")}`,
+        action: () => dispatch("set-tab-encoding", "GB18030"),
+      },
+      { type: "separator" },
+      {
+        type: "item",
+        label: tab.hasBom ? "移除 UTF-8 BOM" : "添加 UTF-8 BOM",
+        action: () => dispatch("set-tab-bom"),
+      },
+    ]);
+  });
+
+  stEol.addEventListener("click", (event) => {
+    const tab = store?.active;
+    if (!tab || tab.binary) return;
+    const tick = (value: string) => (tab.eol === value ? " ✓" : "");
+    showContextMenu(event.clientX, event.clientY, [
+      {
+        type: "item",
+        label: `LF（Unix）${tick("LF")}`,
+        action: () => dispatch("set-tab-eol", "LF"),
+      },
+      {
+        type: "item",
+        label: `CRLF（Windows）${tick("CRLF")}`,
+        action: () => dispatch("set-tab-eol", "CRLF"),
+      },
+    ]);
+  });
 }
 
 export function updateStatus(): void {

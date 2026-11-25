@@ -23,11 +23,13 @@ import {
   applySidebarWidth,
   applyTerminalHeight,
   applyTocWidth,
+  bindPluginResizer,
   bindPreviewResizer,
   bindSidebarResizer,
   bindTerminalResizer,
 } from "./layout";
 import { initFontSize } from "./font-size";
+import { initUiFont } from "./ui-font";
 import { initEditorAppearance } from "./settings";
 import { finishStartupTiming, markStartup } from "./startup-timing";
 import { applyUiScale, bindUiZoom } from "./ui-zoom";
@@ -36,9 +38,11 @@ import { initToc, syncTocVisibility } from "./toc";
 import { bindTabDrag, bindTabDragGlobal, initTabDrag } from "./tab-drag";
 import { initGitMenu, showTreeMenu } from "./git-menu";
 import { initSessionState, buildSession, setRecent } from "./session-state";
-import { initPreviewPanel } from "./preview-panel";
+import { initPreviewPanel, refreshBinaryView } from "./preview-panel";
+import { warmMarkdownRenderer } from "./preview";
 import { initPreviewTranslate } from "./translate-tooltip";
 import { initAppContext, app } from "./app-context";
+import { bindMaximizeControls } from "./maximize";
 import {
   initSidebar,
   syncSidebar,
@@ -48,6 +52,7 @@ import {
   toggleTree,
 } from "./sidebar";
 import { initTabSave, saveTab } from "./tab-save";
+import { scheduleAutoSave } from "./auto-save";
 import { initTabLifecycle, activate, closeTab } from "./tab-lifecycle";
 import {
   initFileOpen,
@@ -58,8 +63,11 @@ import {
   openFolder,
   handleDropped,
   handlePrintDone,
+  recordClosedTab,
 } from "./file-open";
 import { initMenuActions, handleMenuAction, bindShortcuts } from "./menu-actions";
+import { applyEncoding, applyEol, toggleBom } from "./tab-encoding";
+import { initTreeFiles } from "./tree-files";
 import "./styles.css";
 
 interface PrintResultPayload {
@@ -93,6 +101,7 @@ const editor = new EditorController(editorHost, {
     }
     updateStatus();
     scheduleSessionSave(buildSession);
+    scheduleAutoSave();
   },
   onCursor: () => {
     updateStatus();
@@ -141,9 +150,19 @@ initPreviewTranslate();
 // 业务模块装配：跨界回调统一在 main 注入，模块之间保持单向依赖
 initSidebar({ openFolder });
 initTabSave({ renderTabs });
-initTabLifecycle({ renderTabs, syncSidebar, saveTab, newTab });
-initFileOpen({ renderTabs });
+initTabLifecycle({ renderTabs, syncSidebar, saveTab, newTab, onTabClosed: recordClosedTab });
+initFileOpen({ renderTabs, refreshBinaryView });
+initTreeFiles({ renderTabs });
 initMenuActions({ toggleTree, toggleBlockMode });
+
+// 状态栏切换编码 / 换行 / BOM：状态栏只发事件，具体动作在这里接到对应模块
+window.addEventListener("set-tab-encoding", (event) => {
+  void applyEncoding((event as CustomEvent<string>).detail);
+});
+window.addEventListener("set-tab-eol", (event) => {
+  applyEol((event as CustomEvent<"LF" | "CRLF">).detail);
+});
+window.addEventListener("set-tab-bom", () => toggleBom());
 
 // 设置面板切换自动换行（编辑器分类的开关）
 window.addEventListener("set-wrap", (event) => {
@@ -307,6 +326,7 @@ function renderTabs(): void {
 
 async function boot(): Promise<void> {
   bindShortcuts();
+  bindMaximizeControls();
   bindTabDragGlobal();
   // 尽早应用主题，避免深色用户先看到一帧浅色界面
   applyTheme();
@@ -315,7 +335,12 @@ async function boot(): Promise<void> {
   bindUiZoom();
   // 恢复上次的编辑器字号与字体外观，同样赶在首帧之前，避免先按默认值排一帧再跳
   initFontSize();
+  initUiFont();
   initEditorAppearance();
+  // 空闲时预热 Markdown 渲染器，缩短首次打开预览的等待
+  const warmPreview = () => warmMarkdownRenderer();
+  if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(warmPreview, { timeout: 2000 });
+  else window.setTimeout(warmPreview, 1000);
   // 恢复上次的文件树宽度，避免首帧先按默认宽度排版再跳动
   applySidebarWidth();
   bindSidebarResizer();
@@ -323,6 +348,8 @@ async function boot(): Promise<void> {
   bindPreviewResizer();
   applyTerminalHeight();
   bindTerminalResizer();
+  // 插件面板高度同样从本地恢复，避免首次打开时先按默认高度跳一下
+  bindPluginResizer();
   // 列块模式是纯前端行为，直接恢复上次状态并同步状态栏按钮
   editor.setBlockMode(blockMode);
   blockToggle.classList.toggle("on", blockMode);
@@ -456,7 +483,7 @@ async function boot(): Promise<void> {
   try {
     await appWindow.onDragDropEvent((event) => {
       if (event.payload.type === "drop") {
-        void handleDropped(event.payload.paths);
+        void handleDropped(event.payload.paths, event.payload.position);
       }
     });
   } catch (error) {
@@ -465,25 +492,32 @@ async function boot(): Promise<void> {
 
   try {
     await appWindow.onCloseRequested(async (event) => {
+      // Tauri 收到关闭请求后会交给前端处理：这里不 destroy，窗口就不会关，
+      // 所以后续任何一步失败都必须还能走到 destroy，否则点 × 会毫无反应
       event.preventDefault();
-      const dirtyTabs = store.tabs.filter((tab) => tab.dirty);
-      if (dirtyTabs.length > 0) {
-        const choice = await ask(`有 ${dirtyTabs.length} 个标签未保存，确定退出吗？`, [
-          { label: "保存全部", value: "save", primary: true },
-          { label: "不保存退出", value: "discard" },
-          { label: "取消", value: "cancel" },
-        ]);
-        if (choice === "cancel") return;
-        if (choice === "save") {
-          for (const tab of dirtyTabs) {
-            const saved = await saveTab(tab);
-            if (!saved) return;
+      try {
+        const dirtyTabs = store.tabs.filter((tab) => tab.dirty);
+        if (dirtyTabs.length > 0) {
+          const choice = await ask(`有 ${dirtyTabs.length} 个标签未保存，确定退出吗？`, [
+            { label: "保存全部", value: "save", primary: true },
+            { label: "不保存退出", value: "discard" },
+            { label: "取消", value: "cancel" },
+          ]);
+          if (choice === "cancel") return;
+          if (choice === "save") {
+            for (const tab of dirtyTabs) {
+              const saved = await saveTab(tab);
+              if (!saved) return;
+            }
           }
         }
+      } catch (error) {
+        // 弹窗或保存流程自身出错时不再拦着关闭，避免窗口卡死
+        console.error("关闭前确认流程失败", error);
       }
-      await flushSession(buildSession);
+      await flushSession(buildSession).catch((error) => console.error("保存会话失败", error));
       // 先结束终端进程再退出，否则 PTY 子进程会残留
-      await terminal.close();
+      await terminal.close().catch((error) => console.error("关闭终端失败", error));
       await appWindow.destroy();
     });
   } catch (error) {

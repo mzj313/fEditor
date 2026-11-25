@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { app } from "./app-context";
-import { disposeBinaryTab } from "./binary-preview";
+import { disposeBinaryTab, setAutoplay } from "./binary-preview";
 import { ask, message } from "./dialogs";
 import { hidePreview } from "./preview-panel";
 import { scheduleSessionSave } from "./session";
@@ -26,6 +26,7 @@ import {
 import { isWhiteboardText, WHITEBOARD_SKELETON } from "./whiteboard";
 import { expandSidebar } from "./sidebar";
 import { saveTab } from "./tab-save";
+import { tryInsertDroppedImages } from "./md-image";
 import type { OpenMode } from "./file-tree";
 
 interface PrintResultPayload {
@@ -35,6 +36,8 @@ interface PrintResultPayload {
 
 interface FileOpenDeps {
   renderTabs(): void;
+  /** 顺序播放换歌后强制重渲染媒体面板 */
+  refreshBinaryView(tab: Tab): Promise<void>;
 }
 
 let deps: FileOpenDeps;
@@ -109,7 +112,14 @@ export async function openMediaReplacingCurrent(path: string): Promise<void> {
   current.title = basename(path);
   current.loaded = true;
   deps.renderTabs();
-  await activate(current.id);
+  // 当前就在这个音频标签上：直接重渲染面板。
+  // 同一个标签再次 activate 会被切换队列/token 拦截，
+  // 表现为页签标题变了、播放器还停在上一首
+  if (store.activeId === current.id) {
+    await deps.refreshBinaryView(current);
+  } else {
+    await activate(current.id);
+  }
   scheduleSessionSave(buildSession);
 }
 
@@ -142,6 +152,10 @@ async function openBinaryTab(
 export async function openFileFromTree(path: string, mode: OpenMode): Promise<void> {
   const { store } = app;
   const normalized = normalizePath(path);
+  const kind = binaryKindOf(path);
+  // 双击音频立即播放：提前标记，等标签渲染完成后自动开始
+  if (kind === "audio") setAutoplay(path);
+
   const opened = store.tabs.find(
     (tab) => tab.path && normalizePath(tab.path) === normalized,
   );
@@ -151,8 +165,13 @@ export async function openFileFromTree(path: string, mode: OpenMode): Promise<vo
   }
 
   // PDF / Word / 图片 / 音频是只读预览标签，不能顶替当前文本标签
-  if (binaryKindOf(path)) {
-    await openPath(path);
+  if (kind) {
+    // 当前已经是音频标签时复用它，避免每双击一首就多一个页签
+    if (kind === "audio" && store.active?.binary === "audio") {
+      await openMediaReplacingCurrent(path);
+    } else {
+      await openPath(path);
+    }
     return;
   }
 
@@ -213,6 +232,70 @@ export function newTab(): void {
   tab.savedText = "";
   deps.renderTabs();
   void activate(tab.id);
+}
+
+/* ---- 最近关闭的标签 ---- */
+
+interface ClosedSnapshot {
+  path: string | null;
+  title: string;
+  text: string;
+  encoding: string;
+  eol: "LF" | "CRLF";
+  hasBom: boolean;
+  binary?: BinaryKind;
+  canvas?: boolean;
+}
+
+const closedStack: ClosedSnapshot[] = [];
+/** 只保留最近若干条，避免长时间运行后占用内存 */
+const CLOSED_LIMIT = 30;
+
+/** 关闭标签时留一份快照：有磁盘路径的只需路径，未命名草稿要连内容一起保存 */
+export function recordClosedTab(tab: Tab): void {
+  closedStack.push({
+    path: tab.path,
+    title: tab.title,
+    text: tab.path && !tab.binary ? activeText(tab) : tab.savedText,
+    encoding: tab.encoding,
+    eol: tab.eol,
+    hasBom: tab.hasBom,
+    binary: tab.binary,
+    canvas: tab.canvas,
+  });
+  if (closedStack.length > CLOSED_LIMIT) closedStack.shift();
+}
+
+/** 文件 →「重新打开关闭的标签」（Ctrl+Shift+T） */
+export async function reopenClosedTab(): Promise<void> {
+  const snapshot = closedStack.pop();
+  if (!snapshot) {
+    showTransientStatus("没有可恢复的标签");
+    return;
+  }
+  // 有路径的标签重新读盘，能顺带反映磁盘上的最新内容
+  if (snapshot.path) {
+    await openPath(snapshot.path);
+    return;
+  }
+  const { store, editor } = app;
+  const tab = createTab({
+    title: snapshot.title,
+    loaded: true,
+    encoding: snapshot.encoding,
+    eol: snapshot.eol,
+    hasBom: snapshot.hasBom,
+    preview: snapshot.canvas === true,
+    canvas: snapshot.canvas,
+  });
+  tab.state = editor.createState(snapshot.text);
+  tab.savedText = snapshot.text;
+  // 恢复出来的草稿原本就没落盘，继续保持未保存提醒
+  tab.dirty = true;
+  store.add(tab);
+  deps.renderTabs();
+  await activate(tab.id);
+  scheduleSessionSave(buildSession);
 }
 
 /** 新建画板：内容就是一份空 SVG，保存后成为标准 svg 文件 */
@@ -282,8 +365,13 @@ export async function openFolderPath(path: string, fromMenu = false): Promise<vo
   scheduleSessionSave(buildSession);
 }
 
-/** 拖入文件夹时切换工作区，拖入文件时仍按普通文件打开 */
-export async function handleDropped(paths: string[]): Promise<void> {
+/** 拖入文件夹时切换工作区，拖入文件时仍按普通文件打开；
+ *  Markdown 标签下把图片拖进编辑区则转存 assets，不打开新标签 */
+export async function handleDropped(
+  paths: string[],
+  position?: { x: number; y: number },
+): Promise<void> {
+  if (await tryInsertDroppedImages(paths, position)) return;
   for (const path of paths) {
     try {
       const info = await invoke<{ path: string; isDir: boolean; parent: string | null }>(

@@ -1,8 +1,9 @@
-/** 侧栏 / 预览目录 / 终端三个可拖动尺寸：状态记在本地，宽度写到 CSS 变量 */
+/** 侧栏 / 预览目录 / 终端 / 插件面板四个可拖动尺寸：状态记在本地，尺寸写到 CSS 变量 */
 
 const sidebarResizer = document.getElementById("sidebar-resizer") as HTMLDivElement;
 const previewResizer = document.getElementById("preview-resizer") as HTMLDivElement;
 const terminalResizer = document.getElementById("terminal-resizer") as HTMLDivElement;
+const pluginResizer = document.getElementById("plugin-resizer") as HTMLDivElement;
 
 // 文件树宽度同样记在本地；非法或缺失时回落到默认值
 const sidebarMinWidth = 160;
@@ -12,11 +13,13 @@ let sidebarWidth =
   Number.isFinite(savedSidebarWidth) && savedSidebarWidth >= sidebarMinWidth
     ? savedSidebarWidth
     : sidebarDefaultWidth;
-// 预览目录宽度与终端高度，规则同上
+// 预览目录宽度、终端高度与插件面板高度，规则同上
 const tocMinWidth = 120;
 const terminalMinHeight = 100;
+const pluginMinHeight = 160;
 let tocWidth = readStoredSize("fEditor.tocWidth", 220, tocMinWidth);
 let terminalHeight = readStoredSize("fEditor.terminalHeight", 220, terminalMinHeight);
+let pluginHeight = readStoredSize("fEditor.pluginHeight", 340, pluginMinHeight);
 
 /** 读取本地记录的尺寸；缺失或非法时用默认值 */
 function readStoredSize(key: string, fallback: number, min: number): number {
@@ -35,6 +38,18 @@ export function applyTocWidth(): void {
 
 export function applyTerminalHeight(): void {
   document.documentElement.style.setProperty("--terminal-height", `${terminalHeight}px`);
+}
+
+export function applyPluginHeight(): void {
+  document.documentElement.style.setProperty("--plugin-height", `${pluginHeight}px`);
+}
+
+/** 插件打开时用它声明的高度；只是本次会话的建议值，拖动后仍以拖动结果为准 */
+export function setPluginHeight(height: number): void {
+  // 窗口很矮时不能让面板把编辑区挤没
+  const max = Math.max(pluginMinHeight, window.innerHeight - 240);
+  pluginHeight = Math.min(max, Math.max(pluginMinHeight, Math.round(height)));
+  applyPluginHeight();
 }
 
 /**
@@ -125,5 +140,24 @@ export function bindTerminalResizer(): void {
       applyTerminalHeight();
     },
     () => localStorage.setItem("fEditor.terminalHeight", String(Math.round(terminalHeight))),
+  );
+}
+
+/** 插件面板同样贴在编辑区底部：往上拖变高，位移取反 */
+export function bindPluginResizer(): void {
+  applyPluginHeight();
+  let startHeight = pluginHeight;
+  bindDragResizer(
+    pluginResizer,
+    "y",
+    () => {
+      startHeight = pluginHeight;
+    },
+    (delta) => {
+      const max = Math.max(pluginMinHeight, window.innerHeight - 240);
+      pluginHeight = Math.min(max, Math.max(pluginMinHeight, startHeight - delta));
+      applyPluginHeight();
+    },
+    () => localStorage.setItem("fEditor.pluginHeight", String(Math.round(pluginHeight))),
   );
 }

@@ -24,14 +24,21 @@ export function initTabSave(d: TabSaveDeps): void {
   deps = d;
 }
 
-export async function saveTab(tab: Tab, force = false): Promise<boolean> {
+/**
+ * 保存标签。
+ * quiet 用于自动保存：跳过语法检查弹窗，失败时也不弹对话框，只返回 false，
+ * 避免用户打字过程中被打断。
+ */
+export async function saveTab(tab: Tab, force = false, quiet = false): Promise<boolean> {
   if (tab.binary) return false;
   if (tab.error) {
-    await message("原文件已不存在，无法保存当前内容。");
+    if (!quiet) await message("原文件已不存在，无法保存当前内容。");
     return false;
   }
   let targetPath = tab.path;
   if (!targetPath) {
+    // 自动保存不会替用户决定保存位置，未命名标签留待手动保存
+    if (quiet) return false;
     // 未命名标签首次保存：标题本身带扩展名就沿用，否则默认按 txt 保存
     const hasExt = /\.[^./\\]+$/.test(tab.title);
     const picked = await invoke<string | null>("pick_save_path", {
@@ -45,7 +52,7 @@ export async function saveTab(tab: Tab, force = false): Promise<boolean> {
 
   // YAML/TOML 的缩进错误往往肉眼难辨，保存前先做一次语法检查
   const title = targetPath ? basename(targetPath) : tab.title;
-  if (isYaml(title) || isToml(title)) {
+  if (!quiet && (isYaml(title) || isToml(title))) {
     const problem = isYaml(title) ? await checkYaml(text) : await checkToml(text);
     if (problem) {
       const choice = await ask(`语法检查未通过：\n${problem}\n\n仍要保存吗？`, [
@@ -84,6 +91,8 @@ export async function saveTab(tab: Tab, force = false): Promise<boolean> {
   } catch (error) {
     const raw = String(error);
     if (raw.includes("EXTERNAL_MODIFIED")) {
+      // 自动保存不替用户做覆盖/重开的决定，留给手动保存处理
+      if (quiet) return false;
       const choice = await ask("文件已被其他程序修改，如何处理？", [
         { label: "重新打开", value: "reload" },
         { label: "仍要覆盖", value: "overwrite" },
@@ -96,6 +105,7 @@ export async function saveTab(tab: Tab, force = false): Promise<boolean> {
       }
       return false;
     }
+    if (quiet) return false;
     await message(`保存失败：\n${raw}`);
     return false;
   }

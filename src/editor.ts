@@ -18,6 +18,7 @@ import { jsonLanguage, jsonFoldService } from "./json-lang";
 import { openFindDialog } from "./find-dialog";
 import { searchModule } from "./search";
 import { hoverTranslate } from "./translate-tooltip";
+import { markdownImagePaste } from "./md-image";
 
 export interface EditorHooks {
   onChange(): void;
@@ -177,6 +178,8 @@ export class EditorController {
       crosshairCursor(),
       EditorState.allowMultipleSelections.of(true),
       blockSelectionStyle(blockFilter),
+      // Markdown 里粘贴图片时转存 assets 并插入引用，其他文件不受影响
+      markdownImagePaste(),
       history(),
       indentOnInput(),
       bracketMatching(),
@@ -231,6 +234,17 @@ export class EditorController {
   }
 
   focus(): void {
+    this.view.focus();
+  }
+
+  /** 跳到指定行（1 开始），用于全文搜索结果定位 */
+  gotoLine(line: number): void {
+    const doc = this.view.state.doc;
+    const number = Math.max(1, Math.min(line, doc.lines));
+    this.view.dispatch({
+      selection: EditorSelection.single(doc.line(number).from),
+      scrollIntoView: true,
+    });
     this.view.focus();
   }
 

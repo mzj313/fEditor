@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { extractDocxHeadings } from "./docx-toc";
 import { parseXmind } from "./mindmap";
 import { disposeMindmap, renderMindmap } from "./mindmap-view";
@@ -86,9 +87,17 @@ export function disposeBinaryTab(path: string | null): void {
   if (!path) return;
   const media = mediaCache.get(path);
   if (!media) return;
+  // 先解绑监听再清 src：清空 src 会触发 onerror，旧代码会走 base64 兜底
+  // 把整个文件重读一遍（大文件尤其慢），还会重设 src 干扰换歌
+  media.onerror = null;
+  media.onended = null;
+  media.ontimeupdate = null;
+  media.onloadedmetadata = null;
   media.pause();
   media.removeAttribute("src");
   mediaCache.delete(path);
+  // 关闭/替换音频时同步清空桌面歌词，避免残留上一首
+  publishLyrics("", "");
 }
 
 export async function renderBinaryPreview(
@@ -638,6 +647,152 @@ async function fallbackToDataUri(
  */
 const mediaCache = new Map<string, HTMLMediaElement>();
 const PLAY_RATES = [0.75, 1, 1.25, 1.5];
+/** 倍速全局生效：换歌后沿用同一速度，不必每次重选 */
+const RATE_KEY = "fEditor.mediaPlaybackRate";
+
+function getPlaybackRate(): number {
+  const raw = Number.parseFloat(localStorage.getItem(RATE_KEY) ?? "");
+  return PLAY_RATES.includes(raw) ? raw : 1;
+}
+
+function savePlaybackRate(rate: number): void {
+  localStorage.setItem(RATE_KEY, String(rate));
+}
+
+/* ---- 歌词 ---- */
+
+interface LyricLine {
+  /** 秒；-1 表示没有时间轴的静态歌词 */
+  time: number;
+  text: string;
+}
+
+/** 按音频路径缓存解析结果：目录扫描 + 读文件只用做一次 */
+const lyricCache = new Map<string, LyricLine[]>();
+const LRC_TIME_TAG = /\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
+
+/** 当前展示的歌词行与高亮状态；换歌或重渲染时重置 */
+let lyricView: {
+  box: HTMLElement;
+  nodes: HTMLElement[];
+  times: number[];
+  active: number;
+} | null = null;
+
+/** 解析 LRC：支持一行多个时间标签；纯文本歌词退化为静态展示 */
+function parseLrc(raw: string): LyricLine[] {
+  const timed: LyricLine[] = [];
+  const plain: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // [ar:歌手] / [ti:歌名] 之类的元信息不显示
+    if (/^\[(ar|ti|al|by|offset|re|ve|length|au|kana):/i.test(trimmed)) continue;
+
+    LRC_TIME_TAG.lastIndex = 0;
+    const times: number[] = [];
+    let end = 0;
+    let match: RegExpExecArray | null;
+    while ((match = LRC_TIME_TAG.exec(trimmed))) {
+      const minutes = Number(match[1]);
+      const seconds = Number(match[2]);
+      const fraction = match[3] ? Number(`0.${match[3]}`) : 0;
+      times.push(minutes * 60 + seconds + fraction);
+      end = LRC_TIME_TAG.lastIndex;
+    }
+    const text = trimmed.slice(end).trim();
+    if (!times.length) {
+      if (text) plain.push(text);
+      continue;
+    }
+    for (const time of times) timed.push({ time, text });
+  }
+
+  timed.sort((a, b) => a.time - b.time);
+  if (timed.length === 0) return plain.map((text) => ({ time: -1, text }));
+  return timed;
+}
+
+/** 把当前歌词推到桌面歌词窗口；空串表示无歌词，窗口随之清空 */
+function publishLyrics(current: string, next: string): void {
+  void emit("desktop-lyric", { current, next }).catch(() => {
+    // 桌面歌词未开启时没有接收方，忽略即可
+  });
+}
+
+async function attachLyrics(
+  media: HTMLMediaElement,
+  box: HTMLElement,
+  path: string,
+): Promise<void> {
+  let lines = lyricCache.get(path);
+  if (!lines) {
+    try {
+      const payload = await invoke<{ path: string; content: string } | null>("find_lyrics", {
+        path,
+      });
+      lines = payload ? parseLrc(payload.content) : [];
+    } catch {
+      // 查找失败按「没有歌词」处理，不影响播放
+      lines = [];
+    }
+    lyricCache.set(path, lines);
+  }
+  // 异步返回时可能已换歌：旧卡片已移出文档就不再渲染
+  if (!box.isConnected) return;
+  if (lines.length === 0) {
+    publishLyrics("", "");
+    return;
+  }
+
+  const nodes: HTMLElement[] = [];
+  box.replaceChildren();
+  for (const line of lines) {
+    const item = document.createElement("div");
+    item.className = "lyric-line";
+    // 间奏行经常是空文本，用音符占位而不是留白
+    item.textContent = line.text || "♪";
+    box.append(item);
+    nodes.push(item);
+  }
+  box.hidden = false;
+
+  if (lines[0].time < 0) {
+    lyricView = null;
+    // 纯文本歌词没有时间轴，桌面歌词只静态显示前两句
+    publishLyrics(nodes[0]?.textContent ?? "", nodes[1]?.textContent ?? "");
+    return;
+  }
+  lyricView = { box, nodes, times: lines.map((line) => line.time), active: -1 };
+  syncLyrics(media.currentTime);
+}
+
+/** 按当前播放时间切换高亮行，并让该行停在歌词框中间 */
+function syncLyrics(currentTime: number): void {
+  const view = lyricView;
+  if (!view) return;
+  let index = -1;
+  for (let i = 0; i < view.times.length; i += 1) {
+    if (view.times[i] > currentTime + 0.15) break;
+    index = i;
+  }
+  if (index === view.active) return;
+  if (view.active >= 0) view.nodes[view.active]?.classList.remove("active");
+  view.active = index;
+  if (index < 0) {
+    publishLyrics("", view.nodes[0]?.textContent ?? "");
+    return;
+  }
+  const node = view.nodes[index];
+  node.classList.add("active");
+  publishLyrics(node.textContent ?? "", view.nodes[index + 1]?.textContent ?? "");
+  // 用相对矩形计算偏移：offsetTop 依赖 offsetParent，歌词框不是定位元素时
+  // 会指向更外层容器，导致滚动位置整体跑偏、高亮行滚出可视区
+  const boxRect = view.box.getBoundingClientRect();
+  const nodeRect = node.getBoundingClientRect();
+  const delta = nodeRect.top - boxRect.top;
+  view.box.scrollTop += delta - view.box.clientHeight / 2 + nodeRect.height / 2;
+}
 /** 兜底方案会把文件读进内存，超过这个体积就不再尝试 */
 const MEDIA_FALLBACK_LIMIT = 100 * 1024 * 1024;
 
@@ -687,6 +842,11 @@ function setPlayMode(mode: PlayMode): void {
 let navigateTo: ((path: string) => Promise<void>) | null = null;
 /** 自动切歌后待播放的路径：渲染到该文件时自动开始播放 */
 let autoplayPath: string | null = null;
+
+/** 双击文件树中的音频：提前标记自动播放目标，渲染完成后立刻开始播放 */
+export function setAutoplay(path: string): void {
+  autoplayPath = path;
+}
 
 export function setMediaNavigator(fn: (path: string) => Promise<void>): void {
   navigateTo = fn;
@@ -783,6 +943,7 @@ function mediaErrorReason(code: number): string {
 }
 
 function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): void {
+  lyricView = null;
   let audio = mediaCache.get(path);
   if (!audio) {
     // 用自带协议的流式地址：asset:// 在部分 WKWebView 上播不了媒体
@@ -794,6 +955,7 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
   // 重新挂回 DOM 时保留 src，避免每次切标签都从头加载
   audio.style.width = "100%";
   audio.loop = getPlayMode() === "repeat-one";
+  audio.playbackRate = getPlaybackRate();
 
   const card = document.createElement("div");
   card.className = "audio-card";
@@ -810,7 +972,12 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
   player.className = "audio-player";
   player.appendChild(audio);
 
-  card.append(title, meta, player);
+  // 歌词区域默认隐藏，找到同名 .lrc 后再显示
+  const lyrics = document.createElement("div");
+  lyrics.className = "media-lyrics";
+  lyrics.hidden = true;
+
+  card.append(title, meta, player, lyrics);
   host.replaceChildren(card);
 
   let fellBack = false;
@@ -831,6 +998,9 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
 
   buildMediaToolbar(toolbar, audio, path);
 
+  // 歌词异步查找，不阻塞播放器出现
+  void attachLyrics(audio, lyrics, path);
+
   // 顺序/列表循环自动切过来的文件：渲染完成即开始播放
   if (autoplayPath && samePath(autoplayPath, path)) {
     autoplayPath = null;
@@ -849,6 +1019,7 @@ function renderVideo(host: HTMLElement, toolbar: HTMLElement, path: string): voi
   }
   video.style.width = "100%";
   video.loop = getPlayMode() === "repeat-one";
+  video.playbackRate = getPlaybackRate();
 
   const card = document.createElement("div");
   card.className = "video-card";
@@ -899,6 +1070,8 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement, path: 
     button.classList.toggle("on", Math.abs(media.playbackRate - rate) < 0.01);
     button.addEventListener("click", () => {
       media.playbackRate = rate;
+      media.defaultPlaybackRate = rate;
+      savePlaybackRate(rate);
       rateButtons.forEach((item) =>
         item.classList.toggle("on", Math.abs(media.playbackRate - rate) < 0.01),
       );
@@ -923,6 +1096,7 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement, path: 
   time.className = "media-time";
   const updateTime = (): void => {
     time.textContent = `${formatTime(media.currentTime)} / ${formatTime(media.duration)}`;
+    syncLyrics(media.currentTime);
   };
   updateTime();
   // 用 on* 赋值而不是 addEventListener，重复渲染时不会叠加监听

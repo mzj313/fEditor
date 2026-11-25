@@ -365,6 +365,125 @@ pub fn search_files(
     Ok(hits)
 }
 
+/// 全文搜索的单条命中；line 从 1 开始，text 是去除首尾空白后的行内容
+#[derive(serde::Serialize)]
+pub struct ContentHit {
+    pub path: String,
+    pub name: String,
+    pub line: u32,
+    pub text: String,
+}
+
+/// 目录内全文搜索：逐行匹配，支持大小写敏感与正则两种模式。
+/// 只读文本文件并跳过二进制，避免把图片、压缩包当成文本扫一遍。
+#[tauri::command]
+pub fn search_content(
+    state: State<'_, AppState>,
+    root: Option<String>,
+    query: String,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Result<Vec<ContentHit>, String> {
+    let start = match root {
+        Some(value) => resolve_inside_root(&state, &value)?,
+        None => lock_root(&state)?,
+    };
+    if !start.is_dir() {
+        return Err("目标不是文件夹".to_string());
+    }
+
+    let keyword = query.trim();
+    if keyword.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 普通文本模式先转义，再复用同一套正则引擎，两种模式逻辑完全一致
+    let pattern = if use_regex {
+        keyword.to_string()
+    } else {
+        regex::escape(keyword)
+    };
+    let matcher = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("正则表达式无效：{e}"))?;
+
+    // 结果、文件数、单文件体积三重上限：避免超大工作区把搜索拖到不可用
+    const MAX_HITS: usize = 500;
+    const MAX_FILES: usize = 20_000;
+    const MAX_FILE_SIZE: u64 = 2 * 1024 * 1024;
+
+    let mut hits = Vec::new();
+    let mut queue = std::collections::VecDeque::from([start]);
+    let mut scanned = 0usize;
+
+    while let Some(dir) = queue.pop_front() {
+        let Ok(reader) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in reader.flatten() {
+            if hits.len() >= MAX_HITS || scanned >= MAX_FILES {
+                break;
+            }
+            let Ok(file_type) = item.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let name = item.file_name().to_string_lossy().to_string();
+            if file_type.is_dir() {
+                if !IGNORED_DIRS.contains(&name.as_str()) {
+                    queue.push_back(item.path());
+                }
+                continue;
+            }
+
+            scanned += 1;
+            let Ok(meta) = item.metadata() else {
+                continue;
+            };
+            if meta.len() > MAX_FILE_SIZE {
+                continue;
+            }
+            let Ok(bytes) = fs::read(item.path()) else {
+                continue;
+            };
+            // 含 NUL 字节的文件按二进制处理，直接跳过
+            if bytes.iter().take(8192).any(|b| *b == 0) {
+                continue;
+            }
+            let Ok((content, _, _)) = decode(&bytes) else {
+                continue;
+            };
+
+            let path = display_path(&item.path());
+            for (index, raw) in content.split('\n').enumerate() {
+                let text = raw.trim_end_matches('\r');
+                if !matcher.is_match(text) {
+                    continue;
+                }
+                hits.push(ContentHit {
+                    path: path.clone(),
+                    name: name.clone(),
+                    line: index as u32 + 1,
+                    // 超长行只保留前 240 个字符，避免单条结果占满整个面板
+                    text: text.trim().chars().take(240).collect(),
+                });
+                if hits.len() >= MAX_HITS {
+                    break;
+                }
+            }
+        }
+        if hits.len() >= MAX_HITS || scanned >= MAX_FILES {
+            break;
+        }
+    }
+
+    hits.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.line.cmp(&b.line)));
+    Ok(hits)
+}
+
 /// 让用户在原生对话框里选择一个文件夹作为工作区
 #[tauri::command]
 pub async fn pick_open_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {    use tauri_plugin_dialog::DialogExt;
@@ -450,6 +569,62 @@ pub fn read_file(path: String) -> Result<FilePayload, String> {
     })
 }
 
+/// 按用户指定的编码重新解码文本文件：自动探测偶尔会把 GBK 认成别的编码，
+/// 状态栏切换编码后需要一条"强制按此编码读取"的路径。
+#[tauri::command]
+pub fn read_file_with_encoding(path: String, encoding: String) -> Result<FilePayload, String> {
+    let p = PathBuf::from(&path);
+    let meta = fs::metadata(&p).map_err(|e| format!("无法读取文件：{e}"))?;
+    if meta.is_dir() {
+        return Err("目标是目录，无法作为文本打开".to_string());
+    }
+    if meta.len() > MAX_SIZE {
+        return Err(format!(
+            "文件超过 {} MB，已拒绝打开",
+            MAX_SIZE / 1024 / 1024
+        ));
+    }
+
+    let bytes = fs::read(&p).map_err(|e| format!("无法读取文件：{e}"))?;
+    if bytes.iter().take(8192).any(|b| *b == 0) {
+        return Err("二进制文件，无法以文本方式打开".to_string());
+    }
+
+    let (raw, has_bom) = if encoding == "UTF-8" {
+        if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            let text = String::from_utf8(bytes[3..].to_vec())
+                .map_err(|_| "文件不是有效的 UTF-8 编码".to_string())?;
+            (text, true)
+        } else {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| "文件不是有效的 UTF-8 编码，可尝试 GBK".to_string())?;
+            (text, false)
+        }
+    } else {
+        let codec = match encoding.as_str() {
+            "GBK" => GBK,
+            "GB18030" => GB18030,
+            other => return Err(format!("不支持的编码：{other}")),
+        };
+        let (text, _, _) = codec.decode(&bytes);
+        (text.into_owned(), false)
+    };
+
+    let crlf = raw.matches("\r\n").count();
+    let eol = if crlf > 0 { "CRLF" } else { "LF" };
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+
+    Ok(FilePayload {
+        path: display_path(&p),
+        content: normalized,
+        encoding,
+        eol: eol.to_string(),
+        has_bom,
+        mtime: mtime_ms(&meta),
+        size: meta.len(),
+    })
+}
+
 #[tauri::command]
 pub fn save_file(
     path: String,
@@ -521,6 +696,87 @@ pub fn path_exists(path: String) -> bool {
     Path::new(&path).exists()
 }
 
+/// 校验用户输入的文件名：只允许单层名称，避免通过 .. 或分隔符逃出父目录
+fn validate_name(name: &str) -> Result<&str, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("名称不能为空".to_string());
+    }
+    if trimmed == "." || trimmed == ".." || trimmed.contains(['/', '\\']) {
+        return Err("名称不能包含路径分隔符".to_string());
+    }
+    if trimmed.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+        return Err("名称包含 Windows 不允许的字符".to_string());
+    }
+    Ok(trimmed)
+}
+
+/// 在指定目录下新建空文件或文件夹，路径必须位于当前工作区内
+#[tauri::command]
+pub fn create_entry(
+    state: State<'_, AppState>,
+    parent: String,
+    name: String,
+    is_dir: bool,
+) -> Result<String, String> {
+    let dir = resolve_inside_root(&state, &parent)?;
+    if !dir.is_dir() {
+        return Err("目标不是文件夹".to_string());
+    }
+    let name = validate_name(&name)?;
+    let target = dir.join(name);
+    if target.exists() {
+        return Err("同名文件或文件夹已存在".to_string());
+    }
+    if is_dir {
+        fs::create_dir(&target).map_err(|e| format!("新建文件夹失败：{e}"))?;
+    } else {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|e| format!("新建文件失败：{e}"))?;
+    }
+    Ok(display_path(&target))
+}
+
+#[tauri::command]
+pub fn rename_entry(
+    state: State<'_, AppState>,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let source = resolve_inside_root(&state, &path)?;
+    if source == lock_root(&state)? {
+        return Err("不能重命名工作区根目录".to_string());
+    }
+    let name = validate_name(&new_name)?;
+    let parent = source
+        .parent()
+        .ok_or_else(|| "目标没有上级目录".to_string())?;
+    let target = parent.join(name);
+    if target.exists() {
+        return Err("同名文件或文件夹已存在".to_string());
+    }
+    fs::rename(&source, &target).map_err(|e| format!("重命名失败：{e}"))?;
+    Ok(display_path(&target))
+}
+
+/// 永久删除文件或目录（目录连同子内容一起删除），前端负责二次确认
+#[tauri::command]
+pub fn delete_entry(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let target = resolve_inside_root(&state, &path)?;
+    if target == lock_root(&state)? {
+        return Err("不能删除工作区根目录".to_string());
+    }
+    if target.is_dir() {
+        fs::remove_dir_all(&target).map_err(|e| format!("删除文件夹失败：{e}"))?;
+    } else {
+        fs::remove_file(&target).map_err(|e| format!("删除文件失败：{e}"))?;
+    }
+    Ok(())
+}
+
 /// 手写 base64 编码，避免为此新增 crate 依赖。
 fn encode_base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] =
@@ -586,6 +842,83 @@ pub fn read_file_base64(
 
     let bytes = fs::read(&p).map_err(|e| format!("无法读取文件：{e}"))?;
     Ok(encode_base64(&bytes))
+}
+
+/// 手写 base64 解码，与 encode_base64 配对使用；
+/// 前端粘贴图片时从剪贴板拿到的是 data URL，去掉前缀后走这里还原字节。
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    fn value(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    let mut out = Vec::with_capacity(input.len() / 4 * 3);
+    let mut acc: u32 = 0;
+    let mut bits = 0u32;
+    for byte in input.bytes() {
+        // 忽略换行与补齐符，兼容带格式化的 base64
+        if byte == b'=' || byte.is_ascii_whitespace() {
+            continue;
+        }
+        let v = value(byte).ok_or_else(|| "图片数据格式无效".to_string())?;
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
+/// 保存 Markdown 粘贴/拖入的图片到指定目录（通常是文档同级的 assets）。
+/// 基础名与扩展名由前端给出，同名时自动追加 -1、-2，避免覆盖已有图片。
+#[tauri::command]
+pub fn save_asset(
+    dir: String,
+    base_name: String,
+    ext: String,
+    base64: String,
+) -> Result<String, String> {
+    let dir_path = PathBuf::from(&dir);
+    fs::create_dir_all(&dir_path).map_err(|e| format!("创建目录失败：{e}"))?;
+
+    // 只保留文件名安全字符，防止调用方传入 ../ 或路径分隔符把文件写到目录外
+    let base: String = base_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_'))
+        .take(64)
+        .collect();
+    let extension: String = ext
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    let base = if base.is_empty() { "image".to_string() } else { base };
+    let extension = if extension.is_empty() { "png".to_string() } else { extension };
+
+    let bytes = decode_base64(&base64)?;
+    if bytes.len() as u64 > MAX_BINARY_SIZE {
+        return Err(format!(
+            "图片超过 {} MB，已拒绝保存",
+            MAX_BINARY_SIZE / (1024 * 1024)
+        ));
+    }
+
+    let mut candidate = dir_path.join(format!("{base}.{extension}"));
+    let mut index = 1;
+    while candidate.exists() {
+        candidate = dir_path.join(format!("{base}-{index}.{extension}"));
+        index += 1;
+    }
+    fs::write(&candidate, bytes).map_err(|e| format!("写入图片失败：{e}"))?;
+    Ok(display_path(&candidate))
 }
 
 /// 从命令行参数中提取要打开的文件；带 `-` 前缀的按标志位跳过。
@@ -655,6 +988,96 @@ pub fn list_audio_siblings(path: String) -> Vec<String> {
             .unwrap_or_default()
     });
     files.iter().map(|item| display_path(item)).collect()
+}
+
+#[derive(Serialize)]
+pub struct LyricPayload {
+    pub path: String,
+    pub content: String,
+}
+
+/// 音频歌词查找：优先当前目录的同名 .lrc，其次最多两层子目录。
+/// 找不到返回 None，前端据此不显示歌词区域。
+#[tauri::command]
+pub fn find_lyrics(path: String) -> Option<LyricPayload> {
+    let audio = Path::new(&path);
+    let stem = audio.file_stem()?.to_string_lossy().to_lowercase();
+    let dir = audio.parent()?;
+
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut visited = 0usize;
+    collect_lrc_files(dir, &stem, 0, &mut visited, &mut found);
+    // 同目录优先，其次层级更浅；最后按路径排序保证结果稳定
+    found.sort_by_key(|item| {
+        (
+            item.components().count(),
+            item.to_string_lossy().to_lowercase(),
+        )
+    });
+    let target = found.into_iter().next()?;
+
+    // 歌词是纯文本，超过 2 MB 基本可以判定不是正常歌词
+    let bytes = fs::read(&target).ok()?;
+    if bytes.len() > 2 * 1024 * 1024 {
+        return None;
+    }
+    let (content, _, _) = decode(&bytes).ok()?;
+    Some(LyricPayload {
+        path: display_path(&target),
+        content,
+    })
+}
+
+/// 递归收集同名歌词；限制深度与目录数，避免在超大音乐库上长时间扫描
+fn collect_lrc_files(
+    dir: &Path,
+    stem: &str,
+    depth: usize,
+    visited: &mut usize,
+    out: &mut Vec<PathBuf>,
+) {
+    if depth > 2 || *visited >= 300 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    *visited += 1;
+
+    let mut subdirs: Vec<PathBuf> = Vec::new();
+    for entry in entries.filter_map(|item| item.ok()) {
+        let item = entry.path();
+        if item.is_dir() {
+            // 跳过隐藏目录，避免扫描无关内容
+            let hidden = item
+                .file_name()
+                .map(|name| name.to_string_lossy().starts_with('.'))
+                .unwrap_or(false);
+            if !hidden {
+                subdirs.push(item);
+            }
+            continue;
+        }
+        let is_lrc = item
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("lrc"))
+            .unwrap_or(false);
+        if !is_lrc {
+            continue;
+        }
+        let same_name = item
+            .file_stem()
+            .map(|name| name.to_string_lossy().to_lowercase() == stem)
+            .unwrap_or(false);
+        if same_name {
+            out.push(item);
+        }
+    }
+
+    for sub in subdirs {
+        collect_lrc_files(&sub, stem, depth + 1, visited, out);
+    }
 }
 
 #[tauri::command]

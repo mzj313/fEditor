@@ -12,11 +12,20 @@ import { openSettingsDialog } from "./settings";
 import { printActiveMarkdown, togglePreview } from "./preview-panel";
 import { saveTab } from "./tab-save";
 import { cycleTab } from "./tab-lifecycle";
-import { ensureEditMode, newTab, newWhiteboard, openFiles, openFolder } from "./file-open";
+import {
+  ensureEditMode,
+  newTab,
+  newWhiteboard,
+  openFiles,
+  openFolder,
+  reopenClosedTab,
+} from "./file-open";
 import { showRecentPopover } from "./recent-popover";
-import { openDiffDialog } from "./diff-view";
+import { focusContentSearch } from "./sidebar";
+import { openPluginByMenuId } from "./plugins/host";
 import { comboFromEvent, DEFAULT_SHORTCUTS, getShortcut } from "./shortcuts";
 import { isJson, isToml, isYaml } from "./tabs";
+import { exitEditorMaximize, toggleEditorMaximize } from "./maximize";
 
 interface MenuActionDeps {
   toggleTree(): Promise<void>;
@@ -213,9 +222,18 @@ async function showFeatures(): Promise<void> {
       [
         "Markdown、JSON、YAML、TOML、SVG 等语法高亮",
         "查找 Ctrl+F、替换 Ctrl+H；JSON 行号栏可折叠代码块",
+        "侧栏搜索支持文件名与全文两种模式，全文可切换大小写与正则，Ctrl+Shift+F 直接唤起",
         "列块模式 Ctrl+Alt+B；格式化文档 Ctrl+Alt+J",
-        "文本对比 Ctrl+Shift+D：左右两栏可选文件或直接粘贴文本",
         "所有菜单动作的快捷键可在设置中自定义",
+      ],
+    ],
+    [
+      "工具",
+      [
+        "文本对比 Ctrl+Shift+D：左右两栏可选文件或直接粘贴文本",
+        "HTTP 调试 Ctrl+Shift+H：请求由本地发出可绕过 CORS，支持参数、请求头、文本/JSON 请求体与文件上传",
+        "响应可查看状态、耗时、大小、响应头，HTML 响应支持沙箱预览（不执行脚本）",
+        "请求与最近 30 条历史自动保存在本地，可一键复制为 curl",
       ],
     ],
     [
@@ -250,6 +268,7 @@ async function showFeatures(): Promise<void> {
         "工作区文件树，自动忽略 node_modules、.git 等目录",
         "文件名搜索，可指定搜索层数，结果在当前标签打开",
         "集成终端；Git 状态与提交前的改动清单按状态分色显示",
+        "终端标题栏可一键最大化（或双击标题栏），编辑区 Ctrl+Alt+M 可隐藏侧栏与底部面板专注写作",
         "设置中可一键注册资源管理器右键菜单，无需管理员权限",
       ],
     ],
@@ -305,6 +324,9 @@ async function showAbout(): Promise<void> {
 }
 
 export async function handleMenuAction(action: string): Promise<void> {
+  // 插件自己声明菜单 id：命中即由插件宿主打开，主程序不需要逐个维护 case
+  if (openPluginByMenuId(action)) return;
+
   if (action === "format.document") {
     await formatJsonTab();
     return;
@@ -332,17 +354,28 @@ export async function handleMenuAction(action: string): Promise<void> {
     case "file.open":
       await openFiles();
       break;
+    case "file.reopen":
+      await reopenClosedTab();
+      break;
     case "folder.open":
+      exitEditorMaximize();
       await openFolder();
       break;
     case "view.tree":
+      // 打开侧栏类面板前先退出编辑区最大化，否则面板被隐藏看不到
+      exitEditorMaximize();
       await deps.toggleTree();
       break;
     case "view.toc":
+      exitEditorMaximize();
       toggleToc();
       break;
     case "view.terminal":
+      exitEditorMaximize();
       await toggleTerminal();
+      break;
+    case "view.maximize":
+      toggleEditorMaximize();
       break;
     case "file.recent":
       showRecentPopover();
@@ -373,11 +406,13 @@ export async function handleMenuAction(action: string): Promise<void> {
     case "edit.replace":
       await openSearchInEditor(true);
       break;
+    case "edit.findInFiles":
+      // 侧栏可能被最大化隐藏，先退出最大化再聚焦搜索框
+      exitEditorMaximize();
+      focusContentSearch();
+      break;
     case "view.preview":
       await togglePreview();
-      break;
-    case "view.diff":
-      openDiffDialog();
       break;
     case "settings.open":
       openSettingsDialog();
@@ -385,6 +420,11 @@ export async function handleMenuAction(action: string): Promise<void> {
     case "edit.block":
       deps.toggleBlockMode();
       break;
+    case "tools.lyrics": {
+      const visible = await invoke<boolean>("toggle_desktop_lyrics");
+      showTransientStatus(visible ? "桌面歌词已开启" : "桌面歌词已关闭");
+      break;
+    }
     case "help.features":
       await showFeatures();
       break;
@@ -409,8 +449,14 @@ export function bindShortcuts(): void {
 
   function buildShortcutMap(): Record<string, string> {
     const map: Record<string, string> = {};
+    const owners = new Map<string, string>();
     for (const [action, combo] of Object.entries(DEFAULT_SHORTCUTS)) {
-      map[getShortcut(action) || combo] = action;
+      const effective = getShortcut(action) || combo;
+      const existing = owners.get(effective);
+      // 插件也会声明快捷键，重复时只提示，不阻止启动
+      if (existing) console.warn(`[shortcuts] ${action} 与 ${existing} 组合键重复：${effective}`);
+      else owners.set(effective, action);
+      map[effective] = action;
     }
     return map;
   }
@@ -422,10 +468,14 @@ export function bindShortcuts(): void {
       target?.closest?.(".xterm") ||
       target === modalInput ||
       target?.closest?.(".find-card") ||
-      // 文本对比面板里的文本域同样需要原生按键行为（Ctrl+A/C/V/F 等）
-      target?.closest?.(".diff-backdrop")
+      // 插件面板里的输入框（如文本对比）同样需要原生按键行为
+      target?.closest?.("#plugin-panel")
     )
       return;
+
+    // 编辑器（CodeMirror）已经处理的组合键不再重复触发：
+    // 否则 Ctrl+F、F3、Ctrl+G 这类两边都绑定的键会执行两次
+    if (event.defaultPrevented) return;
 
     const action = menuShortcuts[comboFromEvent(event)];
     if (action) {

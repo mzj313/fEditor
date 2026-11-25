@@ -2,13 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "fEditor 默认权限",
-  "windows": ["main", "print"],
+  "windows": ["main", "print", "desktop-lyrics"],
   "permissions": [
     "core:default",
     "core:window:allow-destroy",
     "core:window:allow-close",
     "core:window:allow-show",
     "core:window:allow-set-focus",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "core:window:allow-start-dragging"
   ]
 }

@@ -1,15 +1,10 @@
-//! 文本对比：视图菜单 →「文本对比…」
+//! 文本对比插件：挂载到插件宿主的内嵌面板里（非模态）。
 //! 左右两栏各自可「选择文件」或直接粘贴文本；两侧都有内容后自动按行对比，
-//! 面板本身就地显示带行号与整行底色的差异（不再有独立的工具栏和结果区）。
-//! 双击任意一侧可切回文本域继续编辑，改完自动重算。结果用四列网格渲染：
-//! 左行号 / 左文本 / 右行号 / 右文本，行号列紧贴中间分隔线。
+//! 面板本身就地显示带行号与整行底色的差异。双击任意一侧可切回文本域继续
+//! 编辑，改完自动重算。结果用四列网格渲染：左文本 | 左行号 ‖ 右行号 | 右文本。
 
-import { invoke } from "@tauri-apps/api/core";
-
-interface FilePayload {
-  path: string;
-  content: string;
-}
+import type { PluginContext, ToolPlugin } from "../types";
+import "./diff.css";
 
 /** 差异行的类型：相同 / 修改（左右都有但内容不同） / 仅新增 / 仅删除 */
 type DiffKind = "equal" | "mod" | "add" | "del";
@@ -193,26 +188,12 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-let backdrop: HTMLDivElement | null = null;
-/** 自动对比的防抖句柄，关闭面板时要清掉 */
-let compareTimer: number | null = null;
-
-function closeDiffDialog(): void {
-  if (compareTimer !== null) {
-    window.clearTimeout(compareTimer);
-    compareTimer = null;
-  }
-  if (!backdrop) return;
-  backdrop.remove();
-  backdrop = null;
-}
-
 /** 差异行背景：修改/删除在左栏，修改/新增在右栏 */
 function kindClass(kind: DiffKind, side: "left" | "right"): string {
   if (kind === "equal") return "";
-  if (kind === "mod") return side === "left" ? "diff-del-line" : "diff-add-line";
-  if (kind === "del") return side === "left" ? "diff-del-line" : "";
-  return side === "right" ? "diff-add-line" : "";
+  if (kind === "mod") return side === "left" ? "plugin-diff-del" : "plugin-diff-add";
+  if (kind === "del") return side === "left" ? "plugin-diff-del" : "";
+  return side === "right" ? "plugin-diff-add" : "";
 }
 
 /** 渲染差异网格；所有行共用一个滚动容器，左右天然对齐 */
@@ -220,27 +201,27 @@ function renderGrid(host: HTMLElement, leftText: string, rightText: string): voi
   const rows = buildDiffRows(leftText, rightText);
   host.replaceChildren();
   if (!rows.length) {
-    host.append(el("div", "diff-empty", "两侧均为空"));
+    host.append(el("div", "plugin-diff-empty", "两侧均为空"));
     return;
   }
 
-  const grid = el("div", "diff-grid");
+  const grid = el("div", "plugin-diff-grid");
   const limit = Math.min(rows.length, MAX_RENDER_ROWS);
   for (let k = 0; k < limit; k++) {
     const row = rows[k];
-    const node = el("div", `diff-row diff-${row.kind}`);
+    const node = el("div", `plugin-diff-row plugin-diff-${row.kind}`);
     // 列序与截图一致：左文本 | 左行号 ‖ 右行号 | 右文本（行号贴着中间分隔线）
     node.append(
       el(
         "div",
-        `diff-text diff-left ${kindClass(row.kind, "left")}`,
+        `plugin-diff-text plugin-diff-left ${kindClass(row.kind, "left")}`,
         row.leftText ?? "",
       ),
-      el("div", "diff-no", row.leftNo === null ? "" : String(row.leftNo)),
-      el("div", "diff-no", row.rightNo === null ? "" : String(row.rightNo)),
+      el("div", "plugin-diff-no", row.leftNo === null ? "" : String(row.leftNo)),
+      el("div", "plugin-diff-no", row.rightNo === null ? "" : String(row.rightNo)),
       el(
         "div",
-        `diff-text diff-right ${kindClass(row.kind, "right")}`,
+        `plugin-diff-text plugin-diff-right ${kindClass(row.kind, "right")}`,
         row.rightText ?? "",
       ),
     );
@@ -249,71 +230,46 @@ function renderGrid(host: HTMLElement, leftText: string, rightText: string): voi
   host.append(grid);
 
   if (rows.length > limit) {
-    host.append(el("div", "diff-empty", `内容过大，仅显示前 ${limit} 行`));
+    host.append(el("div", "plugin-diff-empty", `内容过大，仅显示前 ${limit} 行`));
   }
 }
 
-/**
- * 单侧栏头：标题 + 文件名（选择后显示）+「选择文件…」。
- * 返回文件名节点，供选择文件后回填。
- */
+/** 单侧栏头：标题 + 文件名（选择后显示）+「选择文件…」，返回文件名节点 */
 function buildPaneHead(
   row: HTMLElement,
   title: string,
   onPick: () => void,
 ): HTMLSpanElement {
-  const head = el("div", "diff-pane-head");
-  head.append(el("span", "diff-pane-title", title));
-  const fileLabel = el("span", "diff-file-label");
+  const head = el("div", "plugin-diff-pane-head");
+  head.append(el("span", "plugin-diff-pane-title", title));
+  const fileLabel = el("span", "plugin-diff-file");
   fileLabel.hidden = true;
-  const pick = el("button", "diff-pick", "选择文件…");
+  const pick = el("button", "plugin-diff-pick", "选择文件…");
   pick.addEventListener("click", onPick);
   head.append(fileLabel, pick);
   row.append(head);
   return fileLabel;
 }
 
-/** 视图菜单 →「文本对比…」入口；已打开时只把焦点放回面板 */
-export function openDiffDialog(): void {
-  if (backdrop) {
-    backdrop.querySelector<HTMLTextAreaElement>(".diff-input")?.focus();
-    return;
-  }
-
-  backdrop = el("div", "diff-backdrop");
-  const card = el("div", "diff-card");
-
-  const head = el("div", "diff-head");
-  head.append(el("span", "diff-title", "文本对比"));
-  const status = el("span", "diff-status", "两侧都有内容后自动对比，双击结果可返回编辑");
-  head.append(status);
-  const close = el("button", "diff-close", "×");
-  close.title = "关闭（Esc）";
-  close.addEventListener("click", () => closeDiffDialog());
-  head.append(close);
-
-  const paneHeads = el("div", "diff-pane-heads");
-  const editors = el("div", "diff-editors");
-  const body = el("div", "diff-body");
+/** 挂载文本对比面板；返回清理函数用于关闭时清定时器 */
+function mount(host: HTMLElement, ctx: PluginContext): () => void {
+  const root = el("div", "plugin-diff");
+  const paneHeads = el("div", "plugin-diff-panes");
+  const editors = el("div", "plugin-diff-editors");
+  const body = el("div", "plugin-diff-body");
+  const status = el("div", "plugin-diff-status", "两侧都有内容后自动对比，双击结果可返回编辑");
   body.hidden = true;
 
-  const leftInput = el("textarea", "diff-input");
-  const rightInput = el("textarea", "diff-input");
+  const leftInput = el("textarea", "plugin-diff-input");
+  const rightInput = el("textarea", "plugin-diff-input");
   for (const input of [leftInput, rightInput]) {
     input.spellcheck = false;
     input.placeholder = "粘贴文本，或点击右上「选择文件…」";
   }
   editors.append(leftInput, rightInput);
 
-  /** 头部状态提示，几秒后自动消失，不占额外空间 */
-  let statusTimer: number | null = null;
-  const setStatus = (text: string): void => {
-    status.textContent = text;
-    if (statusTimer !== null) window.clearTimeout(statusTimer);
-    statusTimer = window.setTimeout(() => {
-      status.textContent = "";
-    }, 5000);
-  };
+  /** 自动对比的防抖句柄 */
+  let compareTimer: number | null = null;
 
   /** 结果态：隐藏文本域，就地显示差异网格 */
   const showView = (): void => {
@@ -347,11 +303,11 @@ export function openDiffDialog(): void {
   ): void => {
     void (async () => {
       try {
-        const paths = await invoke<string[]>("pick_open_files");
+        const paths = await ctx.pickFiles();
         if (!paths.length) return;
         const path = paths[0];
-        // read_file 返回的 content 已统一成 LF，直接放进文本域即可编辑/对比
-        const payload = await invoke<FilePayload>("read_file", { path });
+        // readFile 返回的内容已统一成 LF，直接放进文本域即可编辑/对比
+        const payload = await ctx.readFile(path);
         input.value = payload.content;
         fileLabel.textContent = path.replace(/^.*[\\/]/, "");
         fileLabel.title = payload.path;
@@ -359,7 +315,7 @@ export function openDiffDialog(): void {
         if (leftInput.value && rightInput.value) showView();
         else showEdit(side);
       } catch (error) {
-        setStatus(`读取文件失败：${error}`);
+        status.textContent = `读取文件失败：${error}`;
       }
     })();
   };
@@ -388,23 +344,30 @@ export function openDiffDialog(): void {
     });
   }
 
-  // 双击任意一侧切回编辑：左侧命中 .diff-left，其余按右侧处理
+  // 双击任意一侧切回编辑：右侧命中 .plugin-diff-right，其余按左侧处理
   body.addEventListener("dblclick", (event) => {
     const target = event.target as HTMLElement | null;
-    showEdit(target?.closest(".diff-right") ? "right" : "left");
+    showEdit(target?.closest(".plugin-diff-right") ? "right" : "left");
   });
 
-  card.append(head, paneHeads, editors, body);
-  backdrop.append(card);
-  document.body.append(backdrop);
-
-  // 遮罩上拦截 Esc（文本域内也生效），捕获阶段避免被其他处理抢先
-  backdrop.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeDiffDialog();
-    }
-  });
-
+  root.append(paneHeads, editors, body, status);
+  host.append(root);
   leftInput.focus();
+
+  return () => {
+    if (compareTimer !== null) {
+      window.clearTimeout(compareTimer);
+      compareTimer = null;
+    }
+  };
 }
+
+const plugin: ToolPlugin = {
+  id: "diff",
+  title: "文本对比",
+  menuId: "tools.diff",
+  shortcut: "Ctrl+Shift+D",
+  mount,
+};
+
+export default plugin;

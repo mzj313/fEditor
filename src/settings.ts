@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { getFontSize, onFontSizeChange, setFontSize } from "./font-size";
+import { getUiFontSize, onUiFontSizeChange, setUiFontSize } from "./ui-font";
 import { getUiScale, resetUiZoom } from "./ui-zoom";
 import {
   ACTION_LABELS,
@@ -14,6 +15,7 @@ import {
   setShortcutOverride,
 } from "./shortcuts";
 import { showTransientStatus } from "./statusbar";
+import { isAutoSaveEnabled, setAutoSaveEnabled } from "./auto-save";
 import {
   DEFAULT_HOVER_DELAY_MS,
   HOVER_DELAY_OPTIONS,
@@ -157,9 +159,35 @@ export function openSettingsDialog(): void {
   zoomStack.append(zoomValue, zoomReset);
   zoomRow.append(zoomStack);
 
+  // 界面字号：只影响标签栏/资源管理器/状态栏/弹窗等 HTML 界面文字
+  const uiFontStack = el("div", "settings-size-stack");
+  const uiFontValue = el("span", "settings-size-value", `${getUiFontSize()}px`);
+  const uiFontSlider = el("input", "settings-slider") as HTMLInputElement;
+  uiFontSlider.type = "range";
+  uiFontSlider.min = "10";
+  uiFontSlider.max = "16";
+  uiFontSlider.step = "0.5";
+  uiFontSlider.value = String(getUiFontSize());
+  uiFontSlider.addEventListener("input", () => {
+    setUiFontSize(Number.parseFloat(uiFontSlider.value));
+  });
+  onUiFontSizeChange(() => {
+    uiFontSlider.value = String(getUiFontSize());
+    uiFontValue.textContent = `${getUiFontSize()}px`;
+  });
+  uiFontStack.append(uiFontSlider, uiFontValue);
+
+  const uiFontHint = el(
+    "p",
+    "settings-hint",
+    "影响标签栏、资源管理器、状态栏与提示弹窗；菜单栏是系统原生菜单，不受此项控制。",
+  );
+
   registerCategory("appearance", "外观", [
     buildRow("主题", themeSelect),
     zoomRow,
+    buildRow("界面字体", uiFontStack),
+    uiFontHint,
   ]);
 
   /* ---- 编辑器 ---- */
@@ -213,11 +241,20 @@ export function openSettingsDialog(): void {
     window.dispatchEvent(new CustomEvent("set-wrap", { detail: wrapToggle.checked }));
   });
 
+  // 自动保存：停止输入后延时写回原文件，开关立即持久化
+  const autoSaveToggle = el("input", "settings-toggle") as HTMLInputElement;
+  autoSaveToggle.type = "checkbox";
+  autoSaveToggle.checked = isAutoSaveEnabled();
+  autoSaveToggle.addEventListener("change", () => {
+    setAutoSaveEnabled(autoSaveToggle.checked);
+  });
+
   registerCategory("editor", "编辑器", [
     buildRow("字体", familySelect),
     buildRow("字号", sizeStack),
     buildRow("行高", lineHeightSelect),
     buildRow("自动换行", wrapToggle),
+    buildRow("自动保存", autoSaveToggle),
   ]);
 
   /* ---- 翻译 ---- */

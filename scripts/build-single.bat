@@ -78,6 +78,20 @@ if defined TOO_BIG (
   if exist dist rmdir /s /q dist
   echo [INFO] The current exe still carries the stale chunks. Run this script once more to get a smaller one.
 )
+rem Interactive runs: offer to launch the freshly built exe, then close the window.
+rem Enter alone means yes: pre-set Y and only bail out when N is typed.
+if defined NOPAUSE goto :note
+
+echo.
+set "LAUNCH=Y"
+set /p "LAUNCH=Open fEditor.exe now? [Y/n] "
+if /i "%LAUNCH%"=="n" goto :note
+echo [INFO] Opening dist-build\fEditor.exe ...
+start "" "dist-build\fEditor.exe"
+rem Close the console window right after launching
+exit /b 0
+
+:note
 echo.
 echo NOTE: frontend-only changes also require this script, assets are embedded.
 call :finish 0

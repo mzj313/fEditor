@@ -43,6 +43,8 @@ interface TabLifecycleDeps {
   syncSidebar(): void;
   saveTab(tab: Tab, force?: boolean): Promise<boolean>;
   newTab(): void;
+  /** 标签被关闭后回调，用于记录「最近关闭」快照 */
+  onTabClosed(tab: Tab): void;
 }
 
 let deps: TabLifecycleDeps;
@@ -132,6 +134,21 @@ async function followTabFolder(tab: Tab): Promise<void> {
 }
 
 /**
+ * 切换标签后让下方已打开的集成终端进入该文件所在目录。
+ * 终端未显示或还没建立会话时 syncDirectory 会直接返回，不会无谓拉起面板。
+ */
+function followTerminalDirectory(tab: Tab): void {
+  if (!tab.path) return;
+  const unified = tab.path.replace(/\\/g, "/");
+  const cut = unified.lastIndexOf("/");
+  if (cut <= 0) return;
+  let dir = tab.path.slice(0, cut);
+  // 盘符根目录（D:）要补斜杠才是有效路径
+  if (/^[A-Za-z]:$/.test(dir)) dir = `${dir}/`;
+  void app.terminal.syncDirectory(dir);
+}
+
+/**
  * 标签切换统一排队执行。
  * 切换里要读盘、建语法状态、渲染预览，都是异步的；
  * 允许并发就会出现“后点的还没跑完，先点的又把面板和编辑器改回去”，
@@ -170,6 +187,8 @@ async function activateNow(id: string, focus: boolean, followFolder: boolean): P
   }
   store.setActive(id);
   deps.renderTabs();
+  // 终端跟随当前标签目录（仅显示中且会话已建立时生效）
+  followTerminalDirectory(tab);
   hidePreview();
   // 预览型标签先切到预览面板占位，避免渲染完成前编辑器原文先闪现
   const willPreview =
@@ -276,6 +295,8 @@ export async function closeTab(id: string): Promise<void> {
 
   const wasActive = tab.id === store.activeId;
   if (tab.binary) disposeBinaryTab(tab.path);
+  // 先留快照再移除，未命名草稿也能在 Ctrl+Shift+T 时找回
+  deps.onTabClosed(tab);
   store.remove(id);
   if (displayedId === id) displayedId = null;
   if (store.tabs.length === 0) {

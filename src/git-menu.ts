@@ -4,6 +4,7 @@ import { ask, message, promptText } from "./dialogs";
 import type { FileTree, TreeEntry } from "./file-tree";
 import { parentDir } from "./paths";
 import type { TerminalPanel } from "./terminal";
+import { createEntry, deleteEntry, renameEntry } from "./tree-files";
 
 interface GitRepoInfo {
   root: string;
@@ -49,6 +50,18 @@ export async function showTreeMenu(entry: TreeEntry | null, event: MouseEvent): 
     );
   }
   entries.push(
+    { type: "item", label: "新建文件…", action: () => void createEntry(entry, false) },
+    { type: "item", label: "新建文件夹…", action: () => void createEntry(entry, true) },
+  );
+  if (entry) {
+    entries.push(
+      { type: "separator" },
+      { type: "item", label: "重命名…", action: () => void renameEntry(entry) },
+      { type: "item", label: "删除", action: () => void deleteEntry(entry) },
+    );
+  }
+  entries.push(
+    { type: "separator" },
     { type: "item", label: "刷新", action: () => void tree?.refresh() },
     { type: "item", label: "展开全部（3 层）", action: () => void tree?.expandAll() },
     { type: "item", label: "折叠全部", action: () => tree?.collapseAll() },

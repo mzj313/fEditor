@@ -70,6 +70,21 @@ export class TerminalPanel {
     this.panel.hidden = true;
   }
 
+  /**
+   * 切换标签时同步终端所在目录。
+   * 只对已打开、已建立会话的终端生效：不主动拉起面板，也不重复发送相同目录，
+   * 避免切换标签时往 shell 里刷一堆无意义的 cd 命令。
+   */
+  async syncDirectory(cwd: string): Promise<void> {
+    if (!this.visible || this.sessionId === null) return;
+    const normalize = (value: string): string => value.replace(/[\\/]+$/, "").toLowerCase();
+    if (normalize(this.title) === normalize(cwd)) return;
+    await invoke("terminal_write", { id: this.sessionId, data: this.cdCommand(cwd) });
+    this.title = cwd;
+    this.titleEl.textContent = cwd;
+    this.titleEl.title = cwd;
+  }
+
   /** 在指定目录执行一条或多条命令（Git 操作走这里） */
   async run(cwd: string, commands: string | string[]): Promise<void> {
     await this.open(cwd);
