@@ -39,7 +39,6 @@ const BASE_SHORTCUTS: Record<string, string> = {
   "format.code": "Ctrl+Alt+C",
   "format.document": "Ctrl+Alt+J",
   "edit.block": "Ctrl+Alt+B",
-  "tools.lyrics": "Ctrl+Alt+Y",
 };
 
 /** 主程序菜单动作的中文名称 */
@@ -74,7 +73,6 @@ const BASE_LABELS: Record<string, string> = {
   "format.code": "行内代码",
   "format.document": "格式化文档",
   "edit.block": "列块模式",
-  "tools.lyrics": "桌面歌词",
 };
 
 // 插件自己声明菜单 id、标题与默认快捷键，合并后设置面板自动列出，无需改这里

@@ -4,7 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { setPluginHeight } from "../layout";
-import { exitEditorMaximize, exitTerminalMaximize } from "../maximize";
+import { exitEditorMaximize, exitPluginMaximize, exitTerminalMaximize } from "../maximize";
 import { showTransientStatus } from "../statusbar";
 import { findPluginByMenuId } from "./registry";
 import type { PluginContext, PluginFilePayload, ToolPlugin } from "./types";
@@ -36,6 +36,7 @@ export function closePlugin(): void {
   current = null;
   host.replaceChildren();
   panel.hidden = true;
+  exitPluginMaximize();
 }
 
 export function openPlugin(plugin: ToolPlugin): void {

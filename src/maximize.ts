@@ -10,10 +10,14 @@ const editorMaxButton = document.getElementById("editor-max") as HTMLButtonEleme
 const terminalMaxButton = document.getElementById("terminal-max") as HTMLButtonElement;
 const terminalPanel = document.getElementById("terminal-panel") as HTMLElement;
 const terminalHead = document.getElementById("terminal-head") as HTMLElement;
+const pluginPanel = document.getElementById("plugin-panel") as HTMLElement;
+const pluginHead = document.getElementById("plugin-head") as HTMLElement;
+const pluginMaxButton = document.getElementById("plugin-max") as HTMLButtonElement;
 const tabbar = document.getElementById("tabbar") as HTMLElement;
 
 let editorMaximized = false;
 let terminalMaximized = false;
+let pluginMaximized = false;
 
 function syncButtons(): void {
   editorMaxButton.textContent = editorMaximized ? "⤡" : "⤢";
@@ -25,6 +29,12 @@ function syncButtons(): void {
   terminalMaxButton.textContent = terminalMaximized ? "⤡" : "⤢";
   terminalMaxButton.title = terminalMaximized ? "还原终端" : "最大化终端（双击标题栏也可切换）";
   terminalMaxButton.classList.toggle("active", terminalMaximized);
+
+  pluginMaxButton.textContent = pluginMaximized ? "⤡" : "⤢";
+  pluginMaxButton.title = pluginMaximized
+    ? "还原工具面板"
+    : "最大化工具面板（双击标题栏也可切换）";
+  pluginMaxButton.classList.toggle("active", pluginMaximized);
 }
 
 export function isEditorMaximized(): boolean {
@@ -45,6 +55,13 @@ export function exitTerminalMaximize(): void {
   syncButtons();
 }
 
+export function exitPluginMaximize(): void {
+  if (!pluginMaximized) return;
+  pluginMaximized = false;
+  main.classList.remove("plugin-maximized");
+  syncButtons();
+}
+
 export function toggleEditorMaximize(): void {
   if (editorMaximized) {
     exitEditorMaximize();
@@ -53,6 +70,7 @@ export function toggleEditorMaximize(): void {
   }
   // 终端最大化时编辑区是隐藏的，先退出终端，避免两个类同时生效
   exitTerminalMaximize();
+  exitPluginMaximize();
   editorMaximized = true;
   body.classList.add("editor-maximized");
   syncButtons();
@@ -65,11 +83,28 @@ export function toggleTerminalMaximize(): void {
     return;
   }
   exitEditorMaximize();
+  exitPluginMaximize();
   // 预览面板被隐藏时 WebView2 会中断媒体流，先把正在播放的媒体挪到常驻容器
   parkActiveMedia();
   terminalMaximized = true;
   main.classList.add("terminal-maximized");
   syncButtons();
+}
+
+export function togglePluginMaximize(): void {
+  if (pluginMaximized) {
+    exitPluginMaximize();
+    showTransientStatus("已还原工具面板");
+    return;
+  }
+  exitEditorMaximize();
+  exitTerminalMaximize();
+  // 最大化后预览/媒体容器会被隐藏，同样先把正在播放的媒体挪走
+  parkActiveMedia();
+  pluginMaximized = true;
+  main.classList.add("plugin-maximized");
+  syncButtons();
+  showTransientStatus("工具面板已最大化，再次点击还原");
 }
 
 export function bindMaximizeControls(): void {
@@ -83,6 +118,15 @@ export function bindMaximizeControls(): void {
     if ((event.target as HTMLElement).closest("button")) return;
     toggleTerminalMaximize();
   });
+  pluginMaxButton.addEventListener("click", (event) => {
+    // 避免冒泡到标题栏触发双击逻辑
+    event.stopPropagation();
+    togglePluginMaximize();
+  });
+  pluginHead.addEventListener("dblclick", (event) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    togglePluginMaximize();
+  });
   // 标签栏空白处双击同样切换编辑区最大化；落在标签或按钮上不响应
   tabbar.addEventListener("dblclick", (event) => {
     const target = event.target as HTMLElement;
@@ -94,6 +138,10 @@ export function bindMaximizeControls(): void {
   new MutationObserver(() => {
     if (terminalPanel.hidden) exitTerminalMaximize();
   }).observe(terminalPanel, { attributes: true, attributeFilter: ["hidden"] });
+  // 工具面板关闭时同理，否则下次打开会残留全屏状态
+  new MutationObserver(() => {
+    if (pluginPanel.hidden) exitPluginMaximize();
+  }).observe(pluginPanel, { attributes: true, attributeFilter: ["hidden"] });
 
   syncButtons();
 }

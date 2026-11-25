@@ -6,12 +6,18 @@ import httpPlugin from "./http-client";
 import encodingPlugin from "./encoding";
 import regexPlugin from "./regex";
 import colorPlugin from "./color";
+import timestampPlugin from "./timestamp";
+import jwtPlugin from "./jwt";
+import convertPlugin from "./convert";
 import type { ToolPlugin } from "./types";
 
 export const PLUGINS: ToolPlugin[] = [
+  timestampPlugin,
+  jwtPlugin,
+  convertPlugin,
+  encodingPlugin,
   diffPlugin,
   httpPlugin,
-  encodingPlugin,
   regexPlugin,
   colorPlugin,
 ];

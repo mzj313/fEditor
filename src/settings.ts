@@ -404,55 +404,58 @@ export function openSettingsDialog(): void {
     shortcutWrap,
   ]);
 
-  /* ---- 集成 ---- */
-  const ctxToggle = el("input", "settings-toggle") as HTMLInputElement;
-  ctxToggle.type = "checkbox";
-  ctxToggle.checked = false;
-  ctxToggle.disabled = true; // 状态读完前禁用，避免开关与实际注册表不一致
-  const ctxHint = el("p", "settings-hint", "正在读取当前注册状态…");
+  /* ---- 集成（仅 Windows） ---- */
+  // 资源管理器右键菜单靠注册表实现，macOS 没有对应机制，整块不展示
+  if (!navigator.userAgent.includes("Mac OS X")) {
+    const ctxToggle = el("input", "settings-toggle") as HTMLInputElement;
+    ctxToggle.type = "checkbox";
+    ctxToggle.checked = false;
+    ctxToggle.disabled = true; // 状态读完前禁用，避免开关与实际注册表不一致
+    const ctxHint = el("p", "settings-hint", "正在读取当前注册状态…");
 
-  const renderContextMenu = (registered: boolean, exePath: string): void => {
-    ctxToggle.checked = registered;
-    ctxHint.textContent = registered
-      ? `已添加到右键菜单，注册的程序：${exePath}`
-      : "开启后资源管理器右键会出现「用 fEditor 打开」，只写入当前用户注册表，无需管理员权限。";
-  };
+    const renderContextMenu = (registered: boolean, exePath: string): void => {
+      ctxToggle.checked = registered;
+      ctxHint.textContent = registered
+        ? `已添加到右键菜单，注册的程序：${exePath}`
+        : "开启后资源管理器右键会出现「用 fEditor 打开」，只写入当前用户注册表，无需管理员权限。";
+    };
 
-  void invoke<{ registered: boolean; exe_path: string }>("context_menu_status")
-    .then((status) => {
-      renderContextMenu(status.registered, status.exe_path);
-    })
-    .catch((error) => {
-      ctxHint.textContent = `读取注册状态失败：${error}`;
-    })
-    .finally(() => {
-      ctxToggle.disabled = false;
-    });
-
-  ctxToggle.addEventListener("change", () => {
-    const next = ctxToggle.checked;
-    ctxToggle.disabled = true;
-    void invoke<{ registered: boolean; exe_path: string }>("set_context_menu", {
-      enabled: next,
-    })
+    void invoke<{ registered: boolean; exe_path: string }>("context_menu_status")
       .then((status) => {
         renderContextMenu(status.registered, status.exe_path);
-        showTransientStatus(status.registered ? "已添加到右键菜单" : "已从右键菜单移除");
       })
       .catch((error) => {
-        ctxToggle.checked = !next; // 失败回滚开关，保持与注册表一致
-        ctxHint.textContent = String(error);
-        showTransientStatus("右键菜单设置失败");
+        ctxHint.textContent = `读取注册状态失败：${error}`;
       })
       .finally(() => {
         ctxToggle.disabled = false;
       });
-  });
 
-  registerCategory("integration", "集成", [
-    buildRow("资源管理器右键菜单", ctxToggle),
-    ctxHint,
-  ]);
+    ctxToggle.addEventListener("change", () => {
+      const next = ctxToggle.checked;
+      ctxToggle.disabled = true;
+      void invoke<{ registered: boolean; exe_path: string }>("set_context_menu", {
+        enabled: next,
+      })
+        .then((status) => {
+          renderContextMenu(status.registered, status.exe_path);
+          showTransientStatus(status.registered ? "已添加到右键菜单" : "已从右键菜单移除");
+        })
+        .catch((error) => {
+          ctxToggle.checked = !next; // 失败回滚开关，保持与注册表一致
+          ctxHint.textContent = String(error);
+          showTransientStatus("右键菜单设置失败");
+        })
+        .finally(() => {
+          ctxToggle.disabled = false;
+        });
+    });
+
+    registerCategory("integration", "集成", [
+      buildRow("资源管理器右键菜单", ctxToggle),
+      ctxHint,
+    ]);
+  }
 
   // 默认显示第一个分类
   pages.get("appearance")?.classList.add("active");

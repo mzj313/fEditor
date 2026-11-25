@@ -420,11 +420,6 @@ export async function handleMenuAction(action: string): Promise<void> {
     case "edit.block":
       deps.toggleBlockMode();
       break;
-    case "tools.lyrics": {
-      const visible = await invoke<boolean>("toggle_desktop_lyrics");
-      showTransientStatus(visible ? "桌面歌词已开启" : "桌面歌词已关闭");
-      break;
-    }
     case "help.features":
       await showFeatures();
       break;

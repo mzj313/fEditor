@@ -2231,6 +2231,21 @@ body.resizing-y {
   color: var(--danger);
 }
 
+#plugin-max {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+#plugin-max:hover,
+#plugin-max.active {
+  color: var(--accent);
+}
+
 #plugin-host {
   flex: 1;
   min-height: 0;
@@ -2308,6 +2323,22 @@ body.resizing-y {
 }
 
 #main.terminal-maximized #terminal-panel {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+/* 工具面板最大化：编辑区、预览与终端让位，面板占满主区域 */
+#main.plugin-maximized #editor-host,
+#main.plugin-maximized #preview-wrap,
+#main.plugin-maximized #binary-wrap,
+#main.plugin-maximized #terminal-panel,
+#main.plugin-maximized #terminal-resizer,
+#main.plugin-maximized #plugin-resizer {
+  display: none;
+}
+
+#main.plugin-maximized #plugin-panel {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;

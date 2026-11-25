@@ -1,0 +1,177 @@
+/* 工具插件共用的面板布局：顶部工具栏 + 左右内容区 + 状态行 */
+
+.plugin-ui {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.plugin-ui-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.plugin-ui-label {
+  color: var(--text-dim);
+}
+
+.plugin-ui-select,
+.plugin-ui-input {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.plugin-ui-input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.plugin-ui-select:focus,
+.plugin-ui-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.plugin-ui-button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.plugin-ui-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.plugin-ui-panes {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.plugin-ui-side {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.plugin-ui-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.plugin-ui-text {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-family: var(--editor-font-family, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.plugin-ui-text:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.plugin-ui-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.plugin-ui-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  cursor: pointer;
+}
+
+.plugin-ui-row:hover {
+  border-color: var(--accent);
+}
+
+.plugin-ui-key {
+  flex: 0 0 92px;
+  color: var(--text-dim);
+}
+
+.plugin-ui-value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--editor-font-family, monospace);
+  word-break: break-all;
+}
+
+.plugin-ui-status {
+  flex: 0 0 auto;
+  min-height: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.plugin-ui-status.error {
+  color: var(--danger);
+}
+
+.plugin-ui-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+}
+
+.plugin-ui-pre {
+  flex: 1;
+  min-height: 60px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+  font-family: var(--editor-font-family, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

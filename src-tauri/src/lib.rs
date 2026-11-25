@@ -35,6 +35,23 @@ fn set_app_user_model_id(id: &str) {
 #[cfg(not(windows))]
 fn set_app_user_model_id(_id: &str) {}
 
+/// macOS 会自动往「编辑」菜单末尾追加「开始听写」和「表情与符号」，
+/// 这两项是系统文本输入服务，桌面编辑器用不上。AppKit 认下面两个
+/// UserDefaults 键，启动时置为 true 即可不再注入；AutoFill 没有公开开关。
+#[cfg(target_os = "macos")]
+fn hide_system_edit_menu_extras() {
+    use objc2_foundation::{NSString, NSUserDefaults};
+    let defaults = NSUserDefaults::standardUserDefaults();
+    defaults.setBool_forKey(true, &NSString::from_str("NSDisabledDictationMenuItem"));
+    defaults.setBool_forKey(
+        true,
+        &NSString::from_str("NSDisabledCharacterPaletteMenuItem"),
+    );
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_system_edit_menu_extras() {}
+
 /// 打开 WebView2 的捏合与 Ctrl+滚轮缩放开关。
 ///
 /// 经运行时日志证实：WebView2 会把触摸板双指捏合转成 ctrl + wheel 像素流送进页面
@@ -257,17 +274,24 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         &[
             &MenuItem::with_id(
                 app,
-                "tools.diff",
-                "文本对比…",
+                "tools.timestamp",
+                "时间戳转换…",
                 true,
-                Some("CmdOrCtrl+Shift+D"),
+                Some("CmdOrCtrl+Shift+U"),
             )?,
             &MenuItem::with_id(
                 app,
-                "tools.http",
-                "HTTP 调试…",
+                "tools.jwt",
+                "JWT 解码…",
                 true,
-                Some("CmdOrCtrl+Shift+H"),
+                Some("CmdOrCtrl+Shift+J"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tools.convert",
+                "配置格式互转…",
+                true,
+                Some("CmdOrCtrl+Shift+Y"),
             )?,
             &MenuItem::with_id(
                 app,
@@ -275,6 +299,22 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 "编码转换箱…",
                 true,
                 Some("CmdOrCtrl+Shift+G"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "tools.diff",
+                "文本对比…",
+                true,
+                Some("CmdOrCtrl+Shift+D"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "tools.http",
+                "HTTP 调试…",
+                true,
+                Some("CmdOrCtrl+Shift+H"),
             )?,
             &MenuItem::with_id(
                 app,
@@ -289,13 +329,6 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 "取色器…",
                 true,
                 Some("CmdOrCtrl+Shift+K"),
-            )?,
-            &MenuItem::with_id(
-                app,
-                "tools.lyrics",
-                "桌面歌词",
-                true,
-                Some("CmdOrCtrl+Alt+Y"),
             )?,
         ],
     )?;
@@ -350,8 +383,12 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
             &help_menu,
         ],
     )?;
-    // 只挂到主窗口：app.set_menu 会把菜单应用到之后创建的每个窗口，
-    // 桌面歌词小窗会莫名其妙多出一条菜单栏并挤占显示区域
+    // macOS 的菜单属于整个应用，Window::set_menu 在这里是空操作，
+    // 必须挂到 App 上才会替换掉 Tauri 的默认菜单；Windows/Linux 仍只挂主窗口，
+    // 避免桌面歌词等小窗也莫名其妙多出一条菜单栏
+    #[cfg(target_os = "macos")]
+    app.set_menu(menu)?;
+    #[cfg(not(target_os = "macos"))]
     if let Some(main) = app.get_webview_window("main") {
         main.set_menu(menu)?;
     }
@@ -360,6 +397,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    hide_system_edit_menu_extras();
     // 必须在创建任何窗口之前设置，否则 Windows 会拒绝修改
     // （之后调用会返回失败，任务栏仍按 exe 路径归组）
     set_app_user_model_id(APP_USER_MODEL_ID);

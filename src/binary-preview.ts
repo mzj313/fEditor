@@ -1072,8 +1072,8 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement, path: 
       media.playbackRate = rate;
       media.defaultPlaybackRate = rate;
       savePlaybackRate(rate);
-      rateButtons.forEach((item) =>
-        item.classList.toggle("on", Math.abs(media.playbackRate - rate) < 0.01),
+      rateButtons.forEach((item, index) =>
+        item.classList.toggle("on", Math.abs(media.playbackRate - PLAY_RATES[index]) < 0.01),
       );
     });
     return button;
@@ -1092,6 +1092,17 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement, path: 
     modeButton.textContent = PLAY_MODE_LABELS[nextMode];
   });
 
+  // 桌面歌词只对音频有意义：视频没有歌词轨道，工具栏里不出现这个按钮
+  const lyricsButton = document.createElement("button");
+  lyricsButton.textContent = "桌面歌词";
+  lyricsButton.title = "显示或隐藏桌面歌词";
+  lyricsButton.addEventListener("click", () => {
+    void invoke<boolean>("toggle_desktop_lyrics").catch((error) => {
+      console.error("[lyrics] 切换桌面歌词失败", error);
+    });
+  });
+  const lyricsEntry = media instanceof HTMLAudioElement ? [lyricsButton] : [];
+
   const time = document.createElement("span");
   time.className = "media-time";
   const updateTime = (): void => {
@@ -1106,5 +1117,5 @@ function buildMediaToolbar(toolbar: HTMLElement, media: HTMLMediaElement, path: 
     void handleMediaEnded(media, path);
   };
 
-  toolbar.replaceChildren(rateLabel, ...rateButtons, modeButton, time);
+  toolbar.replaceChildren(rateLabel, ...rateButtons, modeButton, ...lyricsEntry, time);
 }
