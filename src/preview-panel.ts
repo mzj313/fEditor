@@ -28,6 +28,8 @@ let store: TabStore | null = null;
 let editor: EditorController | null = null;
 let openPath: ((path: string) => Promise<void>) | null = null;
 let openMedia: ((path: string) => Promise<void>) | null = null;
+/** 切换/重渲染预览时 DOM 会先清空，期间产生的 scroll 不能当成用户滚动记录 */
+let suppressScroll = false;
 
 /** 预览缓存上限：超大文档不缓存，避免整页 HTML 常驻内存 */
 const PREVIEW_CACHE_LIMIT = 4 * 1024 * 1024;
@@ -49,11 +51,34 @@ export function initPreviewPanel(deps: {
     const navigate = openMedia;
     return navigate ? navigate(path) : Promise.resolve();
   });
+  // 实时把预览滚动位置记到当前标签，切换标签或关闭重开时用它恢复
+  previewHost.addEventListener(
+    "scroll",
+    () => {
+      if (suppressScroll) return;
+      const tab = store?.active;
+      if (tab) tab.previewScrollTop = previewHost.scrollTop;
+    },
+    { passive: true },
+  );
+}
+
+/** 预览渲染完成后恢复上次的滚动位置 */
+export function restorePreviewScroll(top: number): void {
+  if (previewWrap.hidden) return;
+  // 等一帧再设，避免刚插入的内容还没完成布局就把 scrollTop 截断
+  requestAnimationFrame(() => {
+    if (!previewWrap.hidden && top > 0) previewHost.scrollTop = top;
+    // 恢复完成后才重新记录滚动
+    suppressScroll = false;
+  });
 }
 
 export function hidePreview(): void {
   previewWrap.hidden = true;
   editorHost.hidden = false;
+  // 面板已隐藏，恢复「允许记录滚动」的状态，避免下次预览无法记忆位置
+  suppressScroll = false;
   // 文本类思维导图预览的缩放/拖动监听也一并释放
   disposeMindmap();
   if (!binaryWrap.hidden) {
@@ -80,6 +105,8 @@ export function showBinaryPanel(): void {
  * 避免 Markdown 渲染完成前编辑器原文先闪现出来
  */
 export function stagePreviewPanel(): void {
+  // 清空内容会触发 scroll 归零，先屏蔽记录
+  suppressScroll = true;
   const hint = document.createElement("div");
   hint.className = "binary-loading";
   hint.textContent = "正在渲染预览…";
@@ -299,7 +326,10 @@ async function handlePreviewLink(event: MouseEvent): Promise<void> {
   }
   if (/^(https?:|mailto:)/i.test(href)) {
     event.preventDefault();
-    window.open(href, "_blank");
+    // WebView 里的 window.open 不会交给系统浏览器，走 Rust 的 open_external
+    void invoke("open_external", { url: href }).catch((error) =>
+      showTransientStatus(`无法打开链接：${error}`),
+    );
     return;
   }
 

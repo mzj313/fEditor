@@ -9,12 +9,13 @@ use tauri::{
 
 const LABEL: &str = "desktop-lyrics";
 const WIDTH: f64 = 760.0;
-const HEIGHT: f64 = 140.0;
+const HEIGHT: f64 = 200.0;
 /// 允许在右键菜单里调整窗口大小，这里做范围兜底，避免拖出无法操作的尺寸
 /// 最小高度要放得下右键菜单，避免菜单被窗口裁掉
 const MIN_WIDTH: f64 = 300.0;
 const MAX_WIDTH: f64 = 2000.0;
-const MIN_HEIGHT: f64 = 140.0;
+/// 最小高度要放得下右键菜单（含播放控制与音量行）
+const MIN_HEIGHT: f64 = 200.0;
 const MAX_HEIGHT: f64 = 500.0;
 /// 记忆上次拖动后的位置，避免每次开启都回到屏幕上方
 const POSITION_FILE: &str = "desktop-lyrics.pos";

@@ -57,10 +57,10 @@ const heightValue = document.getElementById("height-value") as HTMLSpanElement;
 const WIN_WIDTH_KEY = "fEditor.desktopLyricWidth";
 const WIN_HEIGHT_KEY = "fEditor.desktopLyricHeight";
 let winWidth = Number(localStorage.getItem(WIN_WIDTH_KEY)) || 760;
-let winHeight = Number(localStorage.getItem(WIN_HEIGHT_KEY)) || 140;
-// 旧版本可能存过更小的尺寸，这里抬到下限，保证右键菜单完整可见
+let winHeight = Number(localStorage.getItem(WIN_HEIGHT_KEY)) || 200;
+// 旧版本可能存过更小的尺寸，这里抬到下限，保证右键菜单（含播放控制）完整可见
 winWidth = Math.max(300, winWidth);
-winHeight = Math.max(140, winHeight);
+winHeight = Math.max(200, winHeight);
 
 function syncSizeControls(): void {
   widthInput.value = String(winWidth);
@@ -196,11 +196,13 @@ interface PlayerState {
   volume: number;
 }
 
-const controlsEl = document.getElementById("controls") as HTMLDivElement;
+const playerRow = document.getElementById("player-row") as HTMLDivElement;
+const volumeRow = document.getElementById("volume-row") as HTMLDivElement;
 // 注意不要用 prev/next 作 id：歌词的「下一句」元素已经占用了 next
 const prevButton = document.getElementById("prev-track") as HTMLButtonElement;
 const nextButton = document.getElementById("next-track") as HTMLButtonElement;
 const volumeInput = document.getElementById("volume") as HTMLInputElement;
+const volumeValue = document.getElementById("volume-value") as HTMLSpanElement;
 
 function sendCommand(action: string, value?: number): void {
   void emit("desktop-lyric-command", { action, value }).catch(() => undefined);
@@ -209,15 +211,21 @@ function sendCommand(action: string, value?: number): void {
 prevButton.addEventListener("click", () => sendCommand("prev"));
 nextButton.addEventListener("click", () => sendCommand("next"));
 volumeInput.addEventListener("input", () => {
-  sendCommand("volume", Number(volumeInput.value));
+  const value = Number(volumeInput.value);
+  volumeValue.textContent = `${value}%`;
+  sendCommand("volume", value);
 });
 
 void listen<PlayerState>("desktop-lyric-state", (event) => {
   const { hasMedia, volume } = event.payload;
-  // 没有正在播放的音频时隐藏控制条，避免点了没反应
-  controlsEl.hidden = !hasMedia;
+  // 没有正在播放的音频时隐藏播放控制，避免点了没反应
+  playerRow.hidden = !hasMedia;
+  volumeRow.hidden = !hasMedia;
   // 正在拖动滑块时不回写，否则光标会被拽回旧值
-  if (document.activeElement !== volumeInput) volumeInput.value = String(volume);
+  if (document.activeElement !== volumeInput) {
+    volumeInput.value = String(volume);
+    volumeValue.textContent = `${volume}%`;
+  }
 });
 
 // 打开歌词窗时主动要一次状态，主窗口随即回推是否在播放以及当前音量

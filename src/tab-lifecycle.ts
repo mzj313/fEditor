@@ -9,6 +9,7 @@ import {
   showBinaryPanel,
   showPreview,
   stagePreviewPanel,
+  restorePreviewScroll,
 } from "./preview-panel";
 import { isMindText } from "./mindmap";
 import { scheduleSessionSave } from "./session";
@@ -358,7 +359,11 @@ async function activateNow(id: string, focus: boolean, followFolder: boolean): P
 
   await previewTask;
   if (token !== switchingToken) return;
-  if (willPreview) markStartup("预览渲染");
+  if (willPreview) {
+    markStartup("预览渲染");
+    // 预览每切换一次都会重建 DOM，渲染完成后把滚动位置还原
+    restorePreviewScroll(tab.previewScrollTop);
+  }
 
   requestAnimationFrame(() => {
     editor.setScrollTop(tab.scrollTop);

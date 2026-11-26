@@ -65,19 +65,11 @@ if errorlevel 1 (
   echo Stable launcher: %STABLE_DIR%\fEditor.exe
 )
 
-set "TOO_BIG="
 for %%f in (dist-build\fEditor.exe) do (
   echo Done: %%~ff  %%~zf bytes
-  rem dist is never cleared, so stale chunks slowly inflate the exe.
-  rem Past 10 MB (10485760 bytes), drop dist after packaging: the next
-  rem build starts from scratch and drops back to normal size.
-  if %%~zf GTR 10485760 set "TOO_BIG=1"
 )
-if defined TOO_BIG (
-  echo [INFO] fEditor.exe is larger than 10 MB. Clearing dist so the next build is clean.
-  if exist dist rmdir /s /q dist
-  echo [INFO] The current exe still carries the stale chunks. Run this script once more to get a smaller one.
-)
+rem dist 不在这里清理：vite 已开启 emptyOutDir，每次构建都会清空，
+rem 删掉 dist 只会让下次 start.bat 误判为「需要重新构建」。
 rem Interactive runs: offer to launch the freshly built exe, then close the window.
 rem Enter alone means yes: pre-set Y and only bail out when N is typed.
 if defined NOPAUSE goto :note

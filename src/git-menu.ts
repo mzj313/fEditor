@@ -3,6 +3,7 @@ import { showContextMenu, type MenuEntry } from "./context-menu";
 import { ask, message, promptText } from "./dialogs";
 import type { FileTree, TreeEntry } from "./file-tree";
 import { parentDir } from "./paths";
+import { showTransientStatus } from "./statusbar";
 import type { TerminalPanel } from "./terminal";
 import { createEntry, deleteEntry, renameEntry } from "./tree-files";
 
@@ -58,6 +59,7 @@ export async function showTreeMenu(entry: TreeEntry | null, event: MouseEvent): 
       { type: "separator" },
       { type: "item", label: "重命名…", action: () => void renameEntry(entry) },
       { type: "item", label: "删除", action: () => void deleteEntry(entry) },
+      { type: "item", label: "复制路径", action: () => copyPath(entry) },
     );
   }
   entries.push(
@@ -73,8 +75,15 @@ export async function showTreeMenu(entry: TreeEntry | null, event: MouseEvent): 
   showContextMenu(event.clientX, event.clientY, entries);
 }
 
-function gitMenuEntries(dir: string, logScope: string): MenuEntry[] {
-  // Git 操作收进子菜单，命令名保持英文，便于和终端里手敲的命令对应
+/** 复制完整路径到剪贴板；失败时给出提示，避免看起来没反应 */
+function copyPath(entry: TreeEntry): void {
+  void navigator.clipboard.writeText(entry.path).then(
+    () => showTransientStatus("已复制路径"),
+    () => showTransientStatus("复制路径失败"),
+  );
+}
+
+function gitMenuEntries(dir: string, logScope: string): MenuEntry[] {  // Git 操作收进子菜单，命令名保持英文，便于和终端里手敲的命令对应
   return [
     {
       type: "submenu",

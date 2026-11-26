@@ -2,6 +2,7 @@ mod clipboard;
 mod desktop_lyrics;
 mod dict;
 mod disk;
+mod external;
 mod fs_service;
 mod http_client;
 mod media;
@@ -476,6 +477,7 @@ pub fn run() {
             disk::read_disk_health,
             disk::read_disk_health_elevated,
             disk::read_system_info,
+            external::open_external,
             fs_service::search_in_file_range,
             fs_service::save_file,
             fs_service::path_exists,

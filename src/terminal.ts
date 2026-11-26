@@ -30,9 +30,6 @@ export class TerminalPanel {
   private shell = "";
   private title = "";
   private dark = false;
-  /** 切换提示里附带的 CPU/内存占用；15 秒内复用缓存，避免频繁拉起 PowerShell */
-  private systemStats: { cpu: number; mem: number } | null = null;
-  private statsAt = 0;
 
   constructor(
     private panel: HTMLDivElement,
@@ -48,8 +45,6 @@ export class TerminalPanel {
   async open(cwd: string, focus = true): Promise<void> {
     this.panel.hidden = false;
     await this.ensureTerminal();
-    // 首次打开就预取一次，后面的切换提示才有 CPU/内存可显示
-    void this.refreshSystemStats();
 
     if (this.sessionId === null) {
       const result = await invoke<OpenResult>("terminal_open", { cwd });
@@ -64,7 +59,7 @@ export class TerminalPanel {
     }
 
     // 复用会话：不同 shell 的切换目录写法不一样
-    this.writeSwitchHint(cwd);
+    this.writeSwitchHint();
     await invoke("terminal_write", { id: this.sessionId, data: this.cdCommand(cwd) });
     this.title = cwd;
     this.titleEl.textContent = cwd;
@@ -85,7 +80,7 @@ export class TerminalPanel {
     if (!this.visible || this.sessionId === null) return;
     const normalize = (value: string): string => value.replace(/[\\/]+$/, "").toLowerCase();
     if (normalize(this.title) === normalize(cwd)) return;
-    this.writeSwitchHint(cwd);
+    this.writeSwitchHint();
     await invoke("terminal_write", { id: this.sessionId, data: this.cdCommand(cwd) });
     this.title = cwd;
     this.titleEl.textContent = cwd;
@@ -106,31 +101,9 @@ export class TerminalPanel {
     this.term?.focus();
   }
 
-  /** 切目录时画一条分割线提示：直接写显示层，不走 shell，避免多一行命令回显 */
-  private writeSwitchHint(cwd: string): void {
-    const stats = this.systemStats;
-    const suffix = stats ? `（CPU ${stats.cpu}% · 内存 ${stats.mem}%）` : "";
-    this.term?.write(`\r\n\x1b[90m──────── 已切换到 ${cwd}${suffix} ────────\x1b[0m\r\n`);
-    // 本次用缓存值，同时后台刷新，下次切换提示就是新数据
-    void this.refreshSystemStats();
-  }
-
-  /** 读取一次 CPU/内存占用，15 秒内不重复请求 */
-  private async refreshSystemStats(): Promise<void> {
-    if (Date.now() - this.statsAt < 15_000) return;
-    this.statsAt = Date.now();
-    try {
-      const info = await invoke<{
-        cpuUsage: number;
-        totalMemory: number;
-        freeMemory: number;
-      }>("read_system_info");
-      const used = Math.max(0, info.totalMemory - info.freeMemory);
-      const mem = info.totalMemory > 0 ? Math.round((used / info.totalMemory) * 100) : 0;
-      this.systemStats = { cpu: info.cpuUsage, mem };
-    } catch {
-      // 读取失败不影响切换提示，保留上一次的值或留空
-    }
+  /** 切目录时多留一个空行做分隔，直接写显示层，不走 shell，避免多一行命令回显 */
+  private writeSwitchHint(): void {
+    this.term?.write("\r\n\r\n");
   }
 
   /** 生成切换目录命令：cmd 用 cd /d，PowerShell 用 Set-Location，其余按 POSIX shell 处理 */

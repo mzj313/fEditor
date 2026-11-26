@@ -413,6 +413,7 @@ async function boot(): Promise<void> {
           hasBom: Boolean(saved.hasBom),
           mtime: saved.mtime ?? 0,
           scrollTop: saved.scrollTop ?? 0,
+          previewScrollTop: saved.previewScrollTop ?? 0,
           pendingCursor: saved.cursor ?? 0,
           preview: isMarkdown(title) || isSvg(title) || isCsv(title),
           binary,

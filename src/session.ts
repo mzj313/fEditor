@@ -11,6 +11,8 @@ export interface SessionTab {
   mtime: number;
   cursor: number;
   scrollTop: number;
+  /** 预览面板滚动位置，旧会话没有该字段时按 0 处理 */
+  previewScrollTop?: number;
   /** PDF / Word / 图片 / 音视频预览标签，只记路径，不存内容 */
   binary?: "pdf" | "docx" | "image" | "audio" | "video" | "mind";
   /** 画板标签：恢复时保持可视化绘制模式 */

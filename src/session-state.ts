@@ -57,6 +57,7 @@ export function buildSession(): SessionData {
       mtime: tab.mtime,
       cursor: tab.state ? tab.state.selection.main.head : tab.pendingCursor ?? 0,
       scrollTop: tab.id === storeRef.activeId ? editorRef.scrollTop : tab.scrollTop,
+      previewScrollTop: tab.previewScrollTop,
       binary: tab.binary,
       canvas: tab.canvas,
     }));

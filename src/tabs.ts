@@ -26,6 +26,8 @@ export interface Tab {
   state: EditorState | null;
   loaded: boolean;
   scrollTop: number;
+  /** 预览面板的滚动位置：切换标签与关闭后重开时恢复 */
+  previewScrollTop: number;
   preview: boolean;
   error: string | null;
   langApplied: boolean;
@@ -156,6 +158,7 @@ export function createTab(partial: Partial<Tab> = {}): Tab {
     state: partial.state ?? null,
     loaded: partial.loaded ?? false,
     scrollTop: partial.scrollTop ?? 0,
+    previewScrollTop: partial.previewScrollTop ?? 0,
     preview: partial.preview ?? false,
     error: partial.error ?? null,
     langApplied: partial.langApplied ?? false,

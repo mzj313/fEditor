@@ -531,7 +531,8 @@ function holdDocxLinks(root: HTMLElement): void {
       return;
     }
     event.preventDefault();
-    window.open(href, "_blank");
+    // WebView 里的 window.open 不会交给系统浏览器，走 Rust 的 open_external
+    void invoke("open_external", { url: href }).catch(() => undefined);
   });
 }
 
