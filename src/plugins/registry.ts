@@ -9,6 +9,7 @@ import colorPlugin from "./color";
 import timestampPlugin from "./timestamp";
 import jwtPlugin from "./jwt";
 import convertPlugin from "./convert";
+import diskPlugin from "./disk";
 import type { ToolPlugin } from "./types";
 
 export const PLUGINS: ToolPlugin[] = [
@@ -20,6 +21,7 @@ export const PLUGINS: ToolPlugin[] = [
   httpPlugin,
   regexPlugin,
   colorPlugin,
+  diskPlugin,
 ];
 
 /** 按原生菜单 id 查插件；未命中返回 null，交回主程序处理 */

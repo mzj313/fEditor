@@ -1,0 +1,201 @@
+/* 磁盘健康插件：卡片式布局，颜色沿用全局主题变量 */
+
+.disk-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* CPU / 内存概览卡片 */
+.sys-grid {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  padding-bottom: 10px;
+}
+
+.sys-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+.sys-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sys-title {
+  font-weight: 600;
+}
+
+.sys-usage {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.sys-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sys-detail.dim {
+  color: var(--text-dim);
+}
+
+.sys-bar {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.sys-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.sys-bar-fill.hot {
+  background: var(--danger);
+}
+
+.disk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 8px;
+  flex: 0 0 auto;
+}
+
+.disk-refresh {
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.disk-refresh:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.disk-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.disk-auto {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  user-select: none;
+}
+
+.disk-stamp {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.disk-list {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  align-content: start;
+  overflow: auto;
+}
+
+.disk-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+.disk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.disk-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disk-size {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.disk-stats {
+  display: flex;
+  gap: 24px;
+  padding: 8px 0;
+}
+
+.disk-stat-label {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.disk-stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.disk-stat-value.warn {
+  color: #d19a00;
+}
+
+.disk-stat-value.hot {
+  color: var(--danger);
+}
+
+.disk-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.disk-label {
+  color: var(--text-dim);
+  flex: 0 0 auto;
+}
+
+.disk-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disk-empty {
+  padding: 8px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}

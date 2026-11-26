@@ -2,6 +2,16 @@ import type { EditorState } from "@codemirror/state";
 
 export type BinaryKind = "pdf" | "docx" | "audio" | "video" | "image" | "mind";
 
+/** 超大文本只读浏览状态：记录当前块范围与文件总大小 */
+export interface LargeFileInfo {
+  total: number;
+  /** 当前块起始字节，已对齐到行首 */
+  start: number;
+  /** 当前块结束字节（不含） */
+  end: number;
+  encoding: string;
+}
+
 export interface Tab {
   id: string;
   path: string | null;
@@ -22,6 +32,8 @@ export interface Tab {
   pendingCursor: number | null;
   /** 二进制只读预览类型；为空表示普通文本标签 */
   binary?: BinaryKind;
+  /** 超过 100 MB 的文本走只读分块浏览，此时不持有全文 */
+  large?: LargeFileInfo;
   /** 画板标签：SVG 文本 + 可视化手绘画布 */
   canvas?: boolean;
   /** Markdown 预览缓存：内容与路径都没变时直接复用，跳过整页重渲染 */
@@ -121,6 +133,14 @@ export function normalizePath(path: string): string {
   return /^[A-Za-z]:/.test(unified) ? unified.toLowerCase() : unified;
 }
 
+/** 文件大小展示：大文件状态栏与翻页条共用 */
+export function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 KB";
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export function createTab(partial: Partial<Tab> = {}): Tab {
   return {
     id: partial.id ?? tabId(),
@@ -141,6 +161,7 @@ export function createTab(partial: Partial<Tab> = {}): Tab {
     langApplied: partial.langApplied ?? false,
     pendingCursor: partial.pendingCursor ?? null,
     binary: partial.binary,
+    large: partial.large,
     canvas: partial.canvas,
   };
 }

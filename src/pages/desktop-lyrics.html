@@ -105,6 +105,61 @@
         background: rgba(220, 60, 60, 0.85);
       }
 
+      /* 底部播放控制：平时很淡，鼠标移上去才明显，避免干扰歌词 */
+      .controls {
+        position: fixed;
+        left: 50%;
+        bottom: 4px;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 10px;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.45);
+        opacity: 0.3;
+        transition: opacity 0.15s ease;
+        z-index: 15;
+      }
+
+      .controls[hidden] {
+        display: none;
+      }
+
+      .controls:hover,
+      body.menu-open .controls {
+        opacity: 0.95;
+      }
+
+      .controls button {
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #ffffff;
+        font-size: 11px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .controls button:hover {
+        background: rgba(255, 255, 255, 0.16);
+      }
+
+      .volume-label {
+        font-size: 11px;
+        color: #ffffff;
+        opacity: 0.8;
+      }
+
+      .controls input[type="range"] {
+        width: 96px;
+        accent-color: #8ab4ff;
+        cursor: pointer;
+      }
+
       /* 右键菜单：固定宽度，不随歌词窗口尺寸变化 */
       .menu {
         position: fixed;
@@ -201,6 +256,12 @@
       <div class="current" id="current" data-tauri-drag-region></div>
       <div class="next" id="next" data-tauri-drag-region></div>
       <div class="status" id="status" data-tauri-drag-region></div>
+    </div>
+    <div class="controls" id="controls" hidden>
+      <button id="prev-track" title="上一首">◀◀</button>
+      <button id="next-track" title="下一首">▶▶</button>
+      <span class="volume-label">音量</span>
+      <input id="volume" type="range" min="0" max="100" step="1" title="音量" />
     </div>
     <script type="module" src="/src/desktop-lyrics.ts"></script>
   </body>

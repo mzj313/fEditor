@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { disposeBinaryTab } from "./binary-preview";
 import { app } from "./app-context";
 import { ask } from "./dialogs";
+import { hideLargeBar, showLargeChunk } from "./large-file";
 import {
   hidePreview,
   showBinary,
@@ -18,6 +19,7 @@ import { syncTocVisibility } from "./toc";
 import {
   basename,
   binaryKindOf,
+  formatBytes,
   isCsv,
   isJson,
   isMarkdown,
@@ -73,14 +75,70 @@ export async function applyLanguage(title: string): Promise<void> {
   }
 }
 
+/** 与 Rust 端 MAX_SIZE 对应的常规上限，仅用于提示文案 */
+const MAX_TEXT_MB = 100;
+/** Rust 超限错误的格式：FILE_TOO_LARGE:<字节数> */
+const TOO_LARGE_PREFIX = "FILE_TOO_LARGE:";
+
+/** 文本读取结果：普通文本、超大文件（转只读分块浏览）或用户取消 */
+export type ReadTextResult =
+  | { kind: "text"; payload: FilePayload }
+  | { kind: "large"; size: number }
+  | { kind: "cancel" };
+
+/**
+ * 读取文本文件。超过体积上限时不再整份加载，而是询问后转成只读分块浏览，
+ * 避免 GB 级文件把内存和 IPC 撑爆；confirmLarge=false 用于会话恢复时静默处理。
+ */
+export async function readTextFile(
+  path: string,
+  encoding?: string,
+  confirmLarge = true,
+): Promise<ReadTextResult> {
+  const load = (): Promise<FilePayload> =>
+    encoding
+      ? invoke<FilePayload>("read_file_with_encoding", { path, encoding, allowLarge: false })
+      : invoke<FilePayload>("read_file", { path, allowLarge: false });
+  try {
+    return { kind: "text", payload: await load() };
+  } catch (error) {
+    const text = String(error);
+    if (!text.startsWith(TOO_LARGE_PREFIX)) throw error;
+    const bytes = Number(text.slice(TOO_LARGE_PREFIX.length));
+    const size = Number.isFinite(bytes) ? bytes : 0;
+    if (confirmLarge) {
+      const choice = await ask(
+        `“${basename(path)}”大小 ${formatBytes(size)}，超过 ${MAX_TEXT_MB} MB。\n将以只读分块方式打开（可翻页查看，不能编辑），是否继续？`,
+        [
+          { label: "只读打开", value: "open", primary: true },
+          { label: "取消", value: "cancel" },
+        ],
+      );
+      if (choice !== "open") return { kind: "cancel" };
+    }
+    return { kind: "large", size };
+  }
+}
+
 export async function loadTabContent(tab: Tab): Promise<void> {
   if (!tab.path) {
     tab.loaded = true;
     return;
   }
   try {
-    const payload = await invoke<FilePayload>("read_file", { path: tab.path });
-    applyPayload(tab, payload);
+    // 会话恢复的超大文件不再弹窗，直接进入只读分块模式
+    const result = await readTextFile(tab.path, undefined, false);
+    if (result.kind === "text") {
+      applyPayload(tab, result.payload);
+    } else if (result.kind === "large") {
+      tab.large = { total: result.size, start: 0, end: 0, encoding: "UTF-8" };
+      tab.size = result.size;
+      tab.savedText = "";
+    } else {
+      // 用户在超大文件提示里选择取消：标签保留但标记为不可用
+      tab.error = "已取消打开超大文件";
+      tab.savedText = "";
+    }
   } catch (error) {
     tab.error = String(error);
     tab.savedText = "";
@@ -164,6 +222,28 @@ export function activate(id: string, focus = true, followFolder = true): Promise
   return activationQueue;
 }
 
+/**
+ * 大文件只读浏览的激活流程：加载当前块并显示翻页条。
+ * 不做语法高亮和预览，读完一块就能显示，切换代价很小。
+ */
+async function activateLargeTab(
+  tab: Tab,
+  token: number,
+  followFolder: boolean,
+): Promise<void> {
+  const { tree } = app;
+  await showLargeChunk(tab, tab.large?.start ?? 0);
+  if (token !== switchingToken) return;
+  displayedId = tab.id;
+  if (followFolder) {
+    await followTabFolder(tab);
+    if (token !== switchingToken) return;
+  }
+  if (tab.path) tree.markActive(tab.path);
+  updateStatus();
+  scheduleSessionSave(buildSession);
+}
+
 async function activateNow(id: string, focus: boolean, followFolder: boolean): Promise<void> {
   const { store, editor, tree } = app;
   const token = (switchingToken += 1);
@@ -190,6 +270,8 @@ async function activateNow(id: string, focus: boolean, followFolder: boolean): P
   // 终端跟随当前标签目录（仅显示中且会话已建立时生效）
   followTerminalDirectory(tab);
   hidePreview();
+  // 翻页条只属于大文件标签，其它分支统一收起
+  hideLargeBar();
   // 预览型标签先切到预览面板占位，避免渲染完成前编辑器原文先闪现
   const willPreview =
     !tab.binary &&
@@ -219,6 +301,12 @@ async function activateNow(id: string, focus: boolean, followFolder: boolean): P
     return;
   }
 
+  // 超过 100 MB 的文本走只读分块浏览，不建全文编辑器状态
+  if (tab.large) {
+    await activateLargeTab(tab, token, followFolder);
+    return;
+  }
+
   if (!tab.loaded) {
     if (tab.path) {
       await loadTabContent(tab);
@@ -230,11 +318,18 @@ async function activateNow(id: string, focus: boolean, followFolder: boolean): P
     }
   }
 
+  // 会话恢复时读取阶段才发现文件超限，这里改走大文件流程
+  if (tab.large) {
+    await activateLargeTab(tab, token, followFolder);
+    return;
+  }
+
   // 空文档 + 已有磁盘内容，说明状态被之前的中断写坏了，按磁盘内容重建
   const corrupted =
     tab.state !== null && tab.state.doc.length === 0 && !tab.dirty && tab.savedText.length > 0;
   if (!tab.state || corrupted) {
-    const text = tab.error ? `文件已丢失：${tab.path ?? ""}` : tab.savedText;
+    // 直接展示具体错误（文件丢失、编码错误、取消打开超大文件等），比统一文案更清楚
+    const text = tab.error ?? tab.savedText;
     tab.state = editor.createState(text, {
       readOnly: Boolean(tab.error),
       cursor: tab.pendingCursor,

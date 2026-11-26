@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { app } from "./app-context";
-import { applyLanguage, applyPayload, type FilePayload } from "./tab-lifecycle";
+import { applyLanguage, applyPayload, readTextFile } from "./tab-lifecycle";
 import { hidePreview, showPreview } from "./preview-panel";
 import { scheduleSessionSave } from "./session";
 import { activeText, buildSession } from "./session-state";
@@ -30,7 +30,7 @@ export function initTabSave(d: TabSaveDeps): void {
  * 避免用户打字过程中被打断。
  */
 export async function saveTab(tab: Tab, force = false, quiet = false): Promise<boolean> {
-  if (tab.binary) return false;
+  if (tab.binary || tab.large) return false;
   if (tab.error) {
     if (!quiet) await message("原文件已不存在，无法保存当前内容。");
     return false;
@@ -112,12 +112,14 @@ export async function saveTab(tab: Tab, force = false, quiet = false): Promise<b
 }
 
 export async function reloadTab(tab: Tab): Promise<void> {
-  if (!tab.path) return;
+  if (!tab.path || tab.large) return;
   const { store, editor } = app;
   try {
-    const payload = await invoke<FilePayload>("read_file", { path: tab.path });
-    applyPayload(tab, payload);
-    tab.state = editor.createState(payload.content, { cursor: 0 });
+    const result = await readTextFile(tab.path);
+    // 大文件或用户取消时不覆盖当前内容
+    if (result.kind !== "text") return;
+    applyPayload(tab, result.payload);
+    tab.state = editor.createState(result.payload.content, { cursor: 0 });
     tab.loaded = true;
     if (tab.id === store.activeId) {
       editor.setState(tab.state);

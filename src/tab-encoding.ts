@@ -1,20 +1,19 @@
 //! 状态栏的编码 / 换行切换：编码切换会按指定编码重新读盘，
 //! 换行与 BOM 只改保存参数，标记为未保存后由用户决定何时落盘。
 
-import { invoke } from "@tauri-apps/api/core";
 import { app } from "./app-context";
 import { ask, message } from "./dialogs";
 import { hidePreview, showPreview } from "./preview-panel";
 import { scheduleSessionSave } from "./session";
 import { buildSession } from "./session-state";
 import { showTransientStatus, updateStatus } from "./statusbar";
-import { applyLanguage, applyPayload, type FilePayload } from "./tab-lifecycle";
+import { applyLanguage, applyPayload, readTextFile } from "./tab-lifecycle";
 
 /** 按指定编码重新读取当前标签对应的文件 */
 export async function applyEncoding(encoding: string): Promise<void> {
   const { store, editor } = app;
   const tab = store.active;
-  if (!tab || tab.binary || !tab.path) {
+  if (!tab || tab.binary || tab.large || !tab.path) {
     showTransientStatus("当前标签不支持切换编码");
     return;
   }
@@ -26,12 +25,14 @@ export async function applyEncoding(encoding: string): Promise<void> {
     if (choice !== "ok") return;
   }
   try {
-    const payload = await invoke<FilePayload>("read_file_with_encoding", {
-      path: tab.path,
-      encoding,
-    });
-    applyPayload(tab, payload);
-    tab.state = editor.createState(payload.content, { cursor: 0 });
+    const result = await readTextFile(tab.path, encoding);
+    // 大文件不支持按编码重读；用户取消时也保持原内容
+    if (result.kind !== "text") {
+      showTransientStatus("已取消重新读取");
+      return;
+    }
+    applyPayload(tab, result.payload);
+    tab.state = editor.createState(result.payload.content, { cursor: 0 });
     tab.loaded = true;
     tab.langApplied = false;
     editor.setState(tab.state);
@@ -54,7 +55,7 @@ export async function applyEncoding(encoding: string): Promise<void> {
 export function toggleBom(): void {
   const { store } = app;
   const tab = store.active;
-  if (!tab || tab.binary || !tab.path) return;
+  if (!tab || tab.binary || tab.large || !tab.path) return;
   if (tab.encoding !== "UTF-8") {
     showTransientStatus("只有 UTF-8 支持 BOM");
     return;
@@ -69,7 +70,7 @@ export function toggleBom(): void {
 export function applyEol(eol: "LF" | "CRLF"): void {
   const { store } = app;
   const tab = store.active;
-  if (!tab || tab.binary) return;
+  if (!tab || tab.binary || tab.large) return;
   if (tab.eol === eol) return;
   tab.eol = eol;
   tab.dirty = true;

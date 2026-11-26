@@ -85,7 +85,7 @@ Size optimizations: `strip = true`, `lto = true`, `codegen-units = 1`, `panic = 
 
 ### Supported formats
 
-**Editable text** (up to 20 MB, non-binary)
+**Editable text** (up to 100 MB, non-binary)
 
 | Type | Extensions | Capability |
 |---|---|---|
@@ -200,7 +200,7 @@ Decode order: UTF-8 BOM → strict UTF-8 → `chardetng`, with `WINDOWS_1252` fa
 
 - New tabs are named `未命名-N`; the first save opens the native Save As dialog.
 - Closing a dirty tab or the window uses the same "Save / Don't save / Cancel" logic; macOS `Cmd+W`, `Cmd+Q` and Windows window close share it.
-- Default size limit is 20 MB (configurable); CodeMirror's viewport rendering handles very long lines. PDF / Word 100 MB, images 40 MB, audio 100 MB fallback.
+- Default size limit is 100 MB (configurable); CodeMirror's viewport rendering handles very long lines. PDF / Word 100 MB, images 40 MB, audio 100 MB fallback.
 - Read-only files and missing permissions produce an explicit error instead of pretending the save succeeded.
 
 ## Multi-tab State Model

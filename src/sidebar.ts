@@ -279,6 +279,56 @@ function renderContentResults(hits: ContentHit[]): void {
   fileTreeHost.hidden = true;
 }
 
+/** 侧栏命中行：label 用于大文件当前块的「块N」标记，缺省显示行号数字 */
+export interface LineSearchHit {
+  line: number;
+  offset: number;
+  text: string;
+  label?: string;
+}
+
+/** 供大文件浏览复用：把整文件搜索命中渲染到侧栏，点击回调行号与行首偏移 */
+export function showLineSearchResults(
+  title: string,
+  hits: LineSearchHit[],
+  onPick: (hit: LineSearchHit) => void,
+): void {
+  // 外部结果优先，作废侧栏进行中的搜索请求，避免旧结果把它覆盖掉
+  searchToken += 1;
+  if (hits.length === 0) {
+    renderSearchEmpty(title);
+    expandSidebar();
+    return;
+  }
+  searchResults.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "tree-search-count";
+  head.textContent = title;
+  searchResults.append(head);
+
+  for (const hit of hits) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "tree-search-hit";
+    row.title = `第 ${hit.line} 行`;
+
+    const lineNo = document.createElement("span");
+    lineNo.className = "tree-search-line";
+    lineNo.textContent = hit.label ?? String(hit.line);
+
+    const text = document.createElement("span");
+    text.className = "tree-search-text";
+    text.textContent = hit.text || "（空行）";
+
+    row.append(lineNo, text);
+    row.addEventListener("click", () => onPick(hit));
+    searchResults.append(row);
+  }
+  searchResults.hidden = false;
+  fileTreeHost.hidden = true;
+  expandSidebar();
+}
+
 /** 打开命中文件并跳到对应行；全文搜索结果保留，方便连续查看多处命中 */
 async function openContentHit(hit: ContentHit): Promise<void> {
   await openPath(hit.path);

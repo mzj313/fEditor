@@ -17,7 +17,8 @@ const host = document.getElementById("plugin-host") as HTMLElement;
 /** 宿主提供给插件的受控能力 */
 const context: PluginContext = {
   pickFiles: () => invoke<string[]>("pick_open_files"),
-  readFile: (path) => invoke<PluginFilePayload>("read_file", { path }),
+  // 插件运行在宿主内，超限时无法弹确认框，按常规上限拒绝即可
+  readFile: (path) => invoke<PluginFilePayload>("read_file", { path, allowLarge: false }),
   showStatus: (text) => showTransientStatus(text),
 };
 

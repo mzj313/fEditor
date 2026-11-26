@@ -7,6 +7,7 @@ import { applyMarkdownAction, type MarkdownAction } from "./markdown-actions";
 import { formatJsonText } from "./json-lang";
 import { checkToml, checkYaml, formatTomlText, formatYamlText } from "./config-lang";
 import { findNext, findPrevious, replaceAllMatches } from "./search";
+import { openWholeFileSearch } from "./find-dialog";
 import { toggleToc } from "./toc";
 import { openSettingsDialog } from "./settings";
 import { printActiveMarkdown, togglePreview } from "./preview-panel";
@@ -96,6 +97,11 @@ async function formatJsonTab(): Promise<void> {
 
 async function openSearchInEditor(withReplace: boolean): Promise<void> {
   if (!ensureEditMode()) return;
+  // 大文件只读浏览没有加载全文，Ctrl+F 直接搜整份文件
+  if (app.store.active?.large) {
+    openWholeFileSearch();
+    return;
+  }
   app.editor.focus();
   await app.editor.openSearch(withReplace);
 }
@@ -234,6 +240,7 @@ async function showFeatures(): Promise<void> {
         "HTTP 调试 Ctrl+Shift+H：请求由本地发出可绕过 CORS，支持参数、请求头、文本/JSON 请求体与文件上传",
         "响应可查看状态、耗时、大小、响应头，HTML 响应支持沙箱预览（不执行脚本）",
         "请求与最近 30 条历史自动保存在本地，可一键复制为 curl",
+        "系统信息 Ctrl+Shift+I：查看 CPU 使用率、内存占用与物理磁盘健康度、温度、通电时间，可开启 30 秒自动刷新",
       ],
     ],
     [
@@ -318,7 +325,7 @@ async function showAbout(): Promise<void> {
     "编辑：Markdown、JSON、YAML、TOML、SVG 及各类文本 / 源码文件",
     "预览：PDF、Word（.docx）、图片（png/jpg/gif/webp/bmp/ico）、音频（mp3/m4a/wav/aac/flac）、视频（mp4/webm）",
     "导出：Markdown 打印预览生成 PDF",
-    "上限：文本 20 MB，PDF / Word 100 MB，图片 40 MB，音视频 100 MB",
+    "上限：文本 100 MB（超过时可确认后继续打开），PDF / Word 100 MB，图片 40 MB，音视频 100 MB",
   ];
   await message(lines.join("\n"));
 }
@@ -484,6 +491,8 @@ export function bindShortcuts(): void {
 
     if (!mod && event.key === "F3") {
       event.preventDefault();
+      // 大文件没有本块全文，查找下一个由 Ctrl+F 的整文件搜索承担
+      if (app.store.active?.large) return;
       void (event.shiftKey ? findPrevious(app.editor.view) : findNext(app.editor.view));
       return;
     }
@@ -503,6 +512,7 @@ export function bindShortcuts(): void {
     }
     if (key === "g") {
       event.preventDefault();
+      if (app.store.active?.large) return;
       void (event.shiftKey ? findPrevious(app.editor.view) : findNext(app.editor.view));
       return;
     }

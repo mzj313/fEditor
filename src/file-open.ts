@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { app } from "./app-context";
-import { disposeBinaryTab, setAutoplay } from "./binary-preview";
+import { disposeBinaryTab, getActiveAudioPath, setAutoplay } from "./binary-preview";
 import { ask, message } from "./dialogs";
 import { hidePreview } from "./preview-panel";
 import { scheduleSessionSave } from "./session";
@@ -11,7 +11,9 @@ import {
   applyPayload,
   closeTab,
   defaultPreview,
+  readTextFile,
   type FilePayload,
+  type ReadTextResult,
 } from "./tab-lifecycle";
 import {
   basename,
@@ -63,13 +65,20 @@ export async function openPath(path: string, activateAfter = true, record = fals
     return;
   }
 
-  let payload: FilePayload;
+  let result: ReadTextResult;
   try {
-    payload = await invoke<FilePayload>("read_file", { path });
+    result = await readTextFile(path);
   } catch (error) {
     await message(`无法打开文件：\n${path}\n\n${error}`);
     return;
   }
+  // 用户在超大文件提示里选择取消，不创建标签
+  if (result.kind === "cancel") return;
+  if (result.kind === "large") {
+    await openLargeTab(path, result.size, activateAfter, record);
+    return;
+  }
+  const payload = result.payload;
 
   const tab = createTab({ path: payload.path, loaded: true });
   applyPayload(tab, payload);
@@ -87,6 +96,30 @@ export async function openPath(path: string, activateAfter = true, record = fals
   scheduleSessionSave(buildSession);
 }
 
+/** 超大文本：创建只读分块标签，正文由翻页按需从磁盘加载 */
+async function openLargeTab(
+  path: string,
+  size: number,
+  activateAfter: boolean,
+  record = false,
+): Promise<void> {
+  const { store } = app;
+  const tab = createTab({
+    path,
+    title: basename(path),
+    loaded: true,
+    size,
+    // 编码与块范围在首次加载时由 Rust 的探测结果覆盖
+    encoding: "—",
+    large: { total: size, start: 0, end: 0, encoding: "—" },
+  });
+  store.add(tab);
+  if (record) addRecent(path);
+  deps.renderTabs();
+  if (activateAfter) await activate(tab.id);
+  scheduleSessionSave(buildSession);
+}
+
 /** 顺序播放 / 列表循环切歌：复用当前音频标签，避免每首歌都新开一个页签 */
 export async function openMediaReplacingCurrent(path: string): Promise<void> {
   const { store } = app;
@@ -99,9 +132,20 @@ export async function openMediaReplacingCurrent(path: string): Promise<void> {
     return;
   }
 
-  const current = store.active;
-  // 当前标签不是音频预览时（比如用户已切走）退化成普通打开
-  if (!current || current.binary !== "audio" || !current.path) {
+  const active = store.active;
+  // 用户可能已切到别的标签，但要替换的应该是「正在播放的那个」音频标签，
+  // 只看活动标签会导致每次切歌都多开一个页签
+  const playingPath = getActiveAudioPath();
+  const current =
+    active && active.binary === "audio" && active.path
+      ? active
+      : playingPath
+        ? store.tabs.find(
+            (tab) => tab.path && normalizePath(tab.path) === normalizePath(playingPath),
+          ) ?? null
+        : null;
+  // 找不到可复用的音频标签时（比如从没播放过）退化成普通打开
+  if (!current || !current.path) {
     await openPath(path);
     return;
   }
@@ -198,17 +242,36 @@ export async function openFileFromTree(path: string, mode: OpenMode): Promise<vo
     if (choice === "save" && !(await saveTab(current))) return;
   }
 
-  let payload: FilePayload;
+  let result: ReadTextResult;
   try {
-    payload = await invoke<FilePayload>("read_file", { path });
+    result = await readTextFile(path);
   } catch (error) {
     await message(`无法打开文件：\n${path}\n\n${error}`);
     return;
   }
+  // 用户在超大文件提示里选择取消，保持当前标签内容不变
+  if (result.kind === "cancel") return;
   // 读取期间用户可能已经切走，此时复用会覆盖错的文件
   if (store.activeId !== current.id) return;
 
-  replaceTabFile(current, payload);
+  if (result.kind === "large") {
+    // 复用当前标签改为只读分块模式，内容等激活时再按块加载
+    current.binary = undefined;
+    current.path = path;
+    current.title = basename(path);
+    current.large = { total: result.size, start: 0, end: 0, encoding: "…" };
+    current.size = result.size;
+    current.dirty = false;
+    current.error = null;
+    current.state = null;
+    current.loaded = true;
+    current.scrollTop = 0;
+    await activate(current.id);
+    scheduleSessionSave(buildSession);
+    return;
+  }
+
+  replaceTabFile(current, result.payload);
   await activate(current.id);
   scheduleSessionSave(buildSession);
 }

@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
@@ -9,7 +9,10 @@ use encoding_rs::{GB18030, GBK, UTF_8};
 use serde::Serialize;
 use tauri::State;
 
-const MAX_SIZE: u64 = 20 * 1024 * 1024;
+/// 文本文件读取上限；再大一次性读进内存并做字符串解码会明显卡顿
+const MAX_SIZE: u64 = 100 * 1024 * 1024;
+/// 超限错误的固定前缀，后面直接拼字节数；前端据此弹窗询问是否强制打开
+const TOO_LARGE_PREFIX: &str = "FILE_TOO_LARGE:";
 // Markdown 内嵌图片只走内存传输，单独放宽上限，但仍设阈值避免超大文件卡死渲染
 const MAX_BINARY_SIZE: u64 = 50 * 1024 * 1024;
 const EXTERNAL_MODIFIED: &str = "EXTERNAL_MODIFIED";
@@ -96,6 +99,15 @@ pub struct FilePayload {
 pub struct SaveResult {
     pub mtime: u64,
     pub size: u64,
+}
+
+/// 文本读取前的体积检查。用户在前端确认「仍要打开」后才会传 allow_large=true，
+/// 此时不再拦截，由前端承担大文件卡顿的后果。
+fn guard_text_size(len: u64, allow_large: bool) -> Result<(), String> {
+    if len > MAX_SIZE && !allow_large {
+        return Err(format!("{TOO_LARGE_PREFIX}{len}"));
+    }
+    Ok(())
 }
 
 fn mtime_ms(meta: &fs::Metadata) -> u64 {
@@ -533,19 +545,15 @@ fn decode(bytes: &[u8]) -> Result<(String, String, bool), String> {
     Ok((text.into_owned(), name.to_string(), false))
 }
 
+/// `allow_large` 为 true 表示用户已确认接受超限打开，此时跳过体积拦截
 #[tauri::command]
-pub fn read_file(path: String) -> Result<FilePayload, String> {
+pub fn read_file(path: String, allow_large: Option<bool>) -> Result<FilePayload, String> {
     let p = PathBuf::from(&path);
     let meta = fs::metadata(&p).map_err(|e| format!("无法读取文件：{e}"))?;
     if meta.is_dir() {
         return Err("目标是目录，无法作为文本打开".to_string());
     }
-    if meta.len() > MAX_SIZE {
-        return Err(format!(
-            "文件超过 {} MB，已拒绝打开",
-            MAX_SIZE / 1024 / 1024
-        ));
-    }
+    guard_text_size(meta.len(), allow_large.unwrap_or(false))?;
 
     let bytes = fs::read(&p).map_err(|e| format!("无法读取文件：{e}"))?;
     if bytes.iter().take(8192).any(|b| *b == 0) {
@@ -572,18 +580,17 @@ pub fn read_file(path: String) -> Result<FilePayload, String> {
 /// 按用户指定的编码重新解码文本文件：自动探测偶尔会把 GBK 认成别的编码，
 /// 状态栏切换编码后需要一条"强制按此编码读取"的路径。
 #[tauri::command]
-pub fn read_file_with_encoding(path: String, encoding: String) -> Result<FilePayload, String> {
+pub fn read_file_with_encoding(
+    path: String,
+    encoding: String,
+    allow_large: Option<bool>,
+) -> Result<FilePayload, String> {
     let p = PathBuf::from(&path);
     let meta = fs::metadata(&p).map_err(|e| format!("无法读取文件：{e}"))?;
     if meta.is_dir() {
         return Err("目标是目录，无法作为文本打开".to_string());
     }
-    if meta.len() > MAX_SIZE {
-        return Err(format!(
-            "文件超过 {} MB，已拒绝打开",
-            MAX_SIZE / 1024 / 1024
-        ));
-    }
+    guard_text_size(meta.len(), allow_large.unwrap_or(false))?;
 
     let bytes = fs::read(&p).map_err(|e| format!("无法读取文件：{e}"))?;
     if bytes.iter().take(8192).any(|b| *b == 0) {
@@ -622,6 +629,286 @@ pub fn read_file_with_encoding(path: String, encoding: String) -> Result<FilePay
         has_bom,
         mtime: mtime_ms(&meta),
         size: meta.len(),
+    })
+}
+
+/// 大文件分块读取结果：content 是 [start, end) 区间内的完整行
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkPayload {
+    pub content: String,
+    pub start: u64,
+    pub end: u64,
+    pub total: u64,
+    pub encoding: String,
+    pub eof: bool,
+}
+
+/// 大文件只读浏览的默认块大小：再大前端渲染慢，太小翻页太频繁
+const CHUNK_SIZE: u64 = 512 * 1024;
+
+/// 从块内最后一个换行截断；没有换行时按 UTF-8 字符边界回退，避免切出乱码
+fn chunk_cut(buf: &[u8]) -> usize {
+    if let Some(pos) = buf.iter().rposition(|b| *b == b'\n') {
+        return pos + 1;
+    }
+    let mut end = buf.len();
+    let floor = end.saturating_sub(3);
+    while end > floor && (buf[end - 1] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    end
+}
+
+/// 按文件开头 64 KB 探测编码：大文件逐块探测既慢，样本太少也容易误判
+fn detect_chunk_encoding(file: &mut fs::File) -> Result<&'static encoding_rs::Encoding, String> {
+    let mut sample = vec![0u8; 64 * 1024];
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("无法读取文件：{e}"))?;
+    let read = file
+        .read(&mut sample)
+        .map_err(|e| format!("无法读取文件：{e}"))?;
+    sample.truncate(read);
+    if sample.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return Ok(UTF_8);
+    }
+    // 样本末尾可能被截断，去掉最多 3 字节再判断，避免把正常 UTF-8 误判成 GBK
+    let is_utf8 = (0..=3).any(|back| {
+        let len = sample.len().saturating_sub(back);
+        std::str::from_utf8(&sample[..len]).is_ok()
+    });
+    if is_utf8 {
+        return Ok(UTF_8);
+    }
+    let mut detector = EncodingDetector::new();
+    detector.feed(&sample, true);
+    let mut enc = detector.guess(None, true);
+    if enc == encoding_rs::WINDOWS_1252 {
+        enc = GBK;
+    }
+    Ok(enc)
+}
+
+fn encoding_label(enc: &'static encoding_rs::Encoding) -> String {
+    if enc == GBK {
+        "GBK".to_string()
+    } else if enc == GB18030 {
+        "GB18030".to_string()
+    } else if enc == UTF_8 {
+        "UTF-8".to_string()
+    } else {
+        enc.name().to_string()
+    }
+}
+
+/// 超大文本只读浏览：按块返回完整行，避免整份读入内存与 IPC 传输。
+/// offset 由前端按百分比估算，这里会向前回退到行首，保证不会从半行开始。
+#[tauri::command]
+pub fn read_file_chunk(
+    path: String,
+    offset: u64,
+    max_bytes: Option<u64>,
+) -> Result<ChunkPayload, String> {
+    let p = PathBuf::from(&path);
+    let meta = fs::metadata(&p).map_err(|e| format!("无法读取文件：{e}"))?;
+    if meta.is_dir() {
+        return Err("目标是目录，无法作为文本打开".to_string());
+    }
+    let total = meta.len();
+    let chunk = max_bytes
+        .unwrap_or(CHUNK_SIZE)
+        .clamp(64 * 1024, 8 * 1024 * 1024);
+
+    let mut file = fs::File::open(&p).map_err(|e| format!("无法读取文件：{e}"))?;
+    let encoding = detect_chunk_encoding(&mut file)?;
+    let label = encoding_label(encoding);
+
+    let offset = offset.min(total);
+    let mut start = offset;
+    // 首块跳过 UTF-8 BOM，避免正文开头多出不可见字符
+    if offset == 0 && total >= 3 {
+        let mut bom = [0u8; 3];
+        file.seek(SeekFrom::Start(0))
+            .map_err(|e| format!("无法读取文件：{e}"))?;
+        if file.read_exact(&mut bom).is_ok() && bom == [0xEF, 0xBB, 0xBF] {
+            start = 3;
+        }
+    }
+    // 非首块的 offset 可能落在行中间，往回最多 64 KB 定位到行首
+    if offset > 0 {
+        let back = start.min(64 * 1024);
+        let from = start - back;
+        let mut prefix = vec![0u8; back as usize];
+        file.seek(SeekFrom::Start(from))
+            .map_err(|e| format!("无法读取文件：{e}"))?;
+        let read = file
+            .read(&mut prefix)
+            .map_err(|e| format!("无法读取文件：{e}"))?;
+        prefix.truncate(read);
+        if let Some(pos) = prefix.iter().rposition(|b| *b == b'\n') {
+            start = from + pos as u64 + 1;
+        }
+    }
+
+    if start >= total {
+        return Ok(ChunkPayload {
+            content: String::new(),
+            start: total,
+            end: total,
+            total,
+            encoding: label,
+            eof: true,
+        });
+    }
+
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| format!("无法读取文件：{e}"))?;
+    let mut buf = vec![0u8; chunk as usize];
+    let read = file
+        .read(&mut buf)
+        .map_err(|e| format!("无法读取文件：{e}"))?;
+    buf.truncate(read);
+    // 后面还有内容时才需要对齐行尾；已经读到文件末尾就整块返回
+    if start + (read as u64) < total {
+        let cut = chunk_cut(&buf);
+        buf.truncate(cut);
+    }
+    let end = start + buf.len() as u64;
+
+    let content = if encoding == UTF_8 {
+        String::from_utf8_lossy(&buf).into_owned()
+    } else {
+        let (text, _, _) = encoding.decode(&buf);
+        text.into_owned()
+    };
+
+    Ok(ChunkPayload {
+        content,
+        start,
+        end,
+        total,
+        encoding: label,
+        eof: end >= total,
+    })
+}
+
+/// 大文件全文搜索命中：offset 是行首字节位置，前端据此跳到对应分块
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchHit {
+    pub line: u32,
+    pub offset: u64,
+    pub text: String,
+}
+
+/// 分块搜索的一段结果：hits 为本段命中，nextOffset 是下一段起点（行首）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchRange {
+    pub hits: Vec<FileSearchHit>,
+    pub next_offset: u64,
+    /// 本段实际扫描的行数，前端用它累计绝对行号
+    pub line_count: u32,
+    pub eof: bool,
+}
+
+/// 单文件分段搜索：每次只扫一段（默认 8 MB），前端逐段调用实现懒加载。
+/// offset 必须是行首（上一次返回的 nextOffset），line_start 是本段之前的行数。
+#[tauri::command]
+pub async fn search_in_file_range(
+    path: String,
+    query: String,
+    offset: u64,
+    line_start: u32,
+    max_bytes: Option<u64>,
+    max_hits: Option<usize>,
+) -> Result<FileSearchRange, String> {
+    // GB 级文件扫描是 CPU + IO 密集操作，放到阻塞线程池，避免卡住主线程
+    tauri::async_runtime::spawn_blocking(move || {
+        search_range_blocking(&path, &query, offset, line_start, max_bytes, max_hits)
+    })
+    .await
+    .map_err(|e| format!("搜索线程异常：{e}"))?
+}
+
+fn search_range_blocking(
+    path: &str,
+    query: &str,
+    offset: u64,
+    line_start: u32,
+    max_bytes: Option<u64>,
+    max_hits: Option<usize>,
+) -> Result<FileSearchRange, String> {
+    let needle = query.trim();
+    let total = fs::metadata(path)
+        .map_err(|e| format!("无法读取文件：{e}"))?
+        .len();
+    let start = offset.min(total);
+    if needle.is_empty() || start >= total {
+        return Ok(FileSearchRange {
+            hits: Vec::new(),
+            next_offset: total,
+            line_count: 0,
+            eof: true,
+        });
+    }
+
+    let limit_bytes = max_bytes
+        .unwrap_or(8 * 1024 * 1024)
+        .clamp(256 * 1024, 64 * 1024 * 1024);
+    let hit_limit = max_hits.unwrap_or(1000).clamp(1, 5000);
+    let lowered = needle.to_lowercase();
+
+    let mut file = fs::File::open(path).map_err(|e| format!("无法读取文件：{e}"))?;
+    let encoding = detect_chunk_encoding(&mut file)?;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|e| format!("无法读取文件：{e}"))?;
+    let mut reader = std::io::BufReader::new(file);
+
+    let mut hits = Vec::new();
+    let mut pos = start;
+    let mut lines = 0u32;
+    let mut line = Vec::new();
+    let mut eof = false;
+    while pos < total {
+        line.clear();
+        let read = reader
+            .read_until(b'\n', &mut line)
+            .map_err(|e| format!("读取文件失败：{e}"))?;
+        if read == 0 {
+            eof = true;
+            break;
+        }
+        lines += 1;
+        let decoded = if encoding == UTF_8 {
+            String::from_utf8_lossy(&line).into_owned()
+        } else {
+            encoding.decode(&line).0.into_owned()
+        };
+        // 先做原样包含判断，命中不了再转小写比较，减少大文件的行转换开销
+        let matched = decoded.contains(needle) || decoded.to_lowercase().contains(&lowered);
+        if matched {
+            hits.push(FileSearchHit {
+                line: line_start + lines,
+                offset: pos,
+                text: decoded.trim_end().chars().take(240).collect(),
+            });
+        }
+        pos += read as u64;
+        // 命中够了或本段字节数达标就停，剩余部分交给下一次调用
+        if hits.len() >= hit_limit || pos - start >= limit_bytes {
+            break;
+        }
+    }
+    if pos >= total {
+        eof = true;
+    }
+
+    Ok(FileSearchRange {
+        hits,
+        next_offset: pos,
+        line_count: lines,
+        eof,
     })
 }
 

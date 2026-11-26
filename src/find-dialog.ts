@@ -346,6 +346,94 @@ function refresh(current: FindDialog, jump: boolean): void {
   }
 }
 
+/** 整文件查找事件：large-file 模块监听后执行流式搜索并展示结果 */
+export const WHOLE_FILE_SEARCH_EVENT = "large-file-search";
+
+/**
+ * 大文件只读浏览的查找弹框：文件本身没有加载全文，
+ * Ctrl+F 直接输入关键字搜整份文件，结果由侧栏列表展示。
+ */
+export function openWholeFileSearch(): void {
+  let backdrop = document.getElementById("whole-find") as HTMLDivElement | null;
+  if (!backdrop) {
+    backdrop = buildWholeFileDialog();
+  }
+  backdrop.hidden = false;
+  const input = backdrop.querySelector<HTMLInputElement>(".find-input");
+  input?.focus();
+  input?.select();
+}
+
+function buildWholeFileDialog(): HTMLDivElement {
+  const backdrop = document.createElement("div");
+  backdrop.id = "whole-find";
+  backdrop.className = "find-backdrop";
+  backdrop.hidden = true;
+
+  const card = document.createElement("div");
+  card.className = "find-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "整份文件查找");
+
+  const title = document.createElement("div");
+  title.className = "find-title";
+  title.textContent = "在整份文件中查找";
+
+  const row = document.createElement("label");
+  row.className = "find-row";
+  const label = document.createElement("span");
+  label.textContent = "查找";
+  const input = document.createElement("input");
+  input.className = "find-input";
+  input.type = "search";
+  input.placeholder = "输入关键字，回车搜索整份文件";
+  input.spellcheck = false;
+  row.append(label, input);
+
+  const hint = document.createElement("div");
+  hint.className = "find-count";
+  hint.textContent = "结果会显示在左侧栏，点击跳转到对应位置";
+  hint.dataset.state = "empty";
+
+  const actions = document.createElement("div");
+  actions.className = "find-actions";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "关闭";
+  close.className = "find-close";
+  close.addEventListener("click", () => {
+    backdrop.hidden = true;
+  });
+  actions.append(close);
+
+  card.append(title, row, hint, actions);
+  backdrop.append(card);
+  document.body.append(backdrop);
+
+  backdrop.addEventListener("pointerdown", (event) => {
+    if (event.target === backdrop) backdrop.hidden = true;
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      backdrop.hidden = true;
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const keyword = input.value.trim();
+    if (!keyword) return;
+    // 关掉弹框，结果直接出现在侧栏，避免两层窗口叠在一起
+    backdrop.hidden = true;
+    window.dispatchEvent(
+      new CustomEvent(WHOLE_FILE_SEARCH_EVENT, { detail: keyword }),
+    );
+  });
+
+  return backdrop;
+}
+
 function step(current: FindDialog, direction: 1 | -1): void {
   const query = buildQuery(current);
   current.view.dispatch({ effects: setSearchQuery.of(query) });

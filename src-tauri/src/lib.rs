@@ -1,6 +1,7 @@
 mod clipboard;
 mod desktop_lyrics;
 mod dict;
+mod disk;
 mod fs_service;
 mod http_client;
 mod media;
@@ -330,6 +331,13 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+Shift+K"),
             )?,
+            &MenuItem::with_id(
+                app,
+                "tools.system",
+                "系统信息…",
+                true,
+                Some("CmdOrCtrl+Shift+I"),
+            )?,
         ],
     )?;
 
@@ -464,6 +472,11 @@ pub fn run() {
             fs_service::read_file_base64,
             fs_service::save_asset,
             fs_service::read_file_with_encoding,
+            fs_service::read_file_chunk,
+            disk::read_disk_health,
+            disk::read_disk_health_elevated,
+            disk::read_system_info,
+            fs_service::search_in_file_range,
             fs_service::save_file,
             fs_service::path_exists,
             fs_service::create_entry,

@@ -29,7 +29,7 @@ export function setAutoSaveEnabled(on: boolean): void {
 export function scheduleAutoSave(): void {
   if (!isAutoSaveEnabled()) return;
   const tab = app.store.active;
-  if (!tab || !tab.dirty || tab.binary || tab.error || !tab.path) return;
+  if (!tab || !tab.dirty || tab.binary || tab.large || tab.error || !tab.path) return;
 
   const existing = timers.get(tab.id);
   if (existing !== undefined) window.clearTimeout(existing);

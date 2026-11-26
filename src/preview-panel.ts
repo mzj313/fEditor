@@ -257,7 +257,7 @@ function createInteractiveSvgFrame(tab: Tab): HTMLIFrameElement {
 export async function togglePreview(): Promise<void> {
   if (!store || !editor) return;
   const tab = store.active;
-  if (!tab || !(isMarkdown(tab.title) || isSvg(tab.title) || isMindText(tab.title) || isCsv(tab.title)))
+  if (!tab || tab.large || !(isMarkdown(tab.title) || isSvg(tab.title) || isMindText(tab.title) || isCsv(tab.title)))
     return;
   tab.preview = !tab.preview;
   if (tab.preview) {
@@ -324,7 +324,8 @@ previewHost.addEventListener("click", (event) => {
 /** 把当前 Markdown 文档渲染成与预览一致的 HTML，交给打印窗口生成 PDF */
 export async function printActiveMarkdown(): Promise<void> {
   const tab = store?.active;
-  if (!tab || !isMarkdown(tab.title)) {
+  // 大文件只加载了当前块，打印出来会缺内容，直接拒绝
+  if (!tab || tab.large || !isMarkdown(tab.title)) {
     showTransientStatus("打印预览目前只支持 Markdown 文件");
     return;
   }

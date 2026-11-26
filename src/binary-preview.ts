@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { extractDocxHeadings } from "./docx-toc";
 import { parseXmind } from "./mindmap";
 import { disposeMindmap, renderMindmap } from "./mindmap-view";
@@ -98,6 +98,11 @@ export function disposeBinaryTab(path: string | null): void {
   mediaCache.delete(path);
   // 关闭/替换音频时同步清空桌面歌词，避免残留上一首
   publishLyrics("", "");
+  if (activeAudioPath && samePath(activeAudioPath, path)) {
+    activeAudio = null;
+    activeAudioPath = null;
+    publishPlayerState();
+  }
 }
 
 export async function renderBinaryPreview(
@@ -884,6 +889,69 @@ async function handleMediaEnded(media: HTMLMediaElement, path: string): Promise<
   }
 }
 
+/* ---- 桌面歌词窗控制：上一首 / 下一首 / 音量 ---- */
+
+const VOLUME_KEY = "fEditor.mediaVolume";
+/** 当前正在展示的音频；切到文本标签后仍保留，桌面歌词才能继续控制 */
+let activeAudio: HTMLAudioElement | null = null;
+let activeAudioPath: string | null = null;
+
+/** 当前正在播放的音频路径；切歌时据此复用原来的音频标签 */
+export function getActiveAudioPath(): string | null {
+  return activeAudioPath;
+}
+
+function getMediaVolume(): number {
+  const raw = Number.parseFloat(localStorage.getItem(VOLUME_KEY) ?? "");
+  return Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 1;
+}
+
+/** 把播放器状态推给桌面歌词窗：没有媒体时隐藏控制条 */
+function publishPlayerState(): void {
+  void emit("desktop-lyric-state", {
+    hasMedia: activeAudioPath !== null,
+    volume: Math.round(getMediaVolume() * 100),
+  }).catch(() => {
+    // 桌面歌词未开启时没有接收方，忽略即可
+  });
+}
+
+export function setMediaVolume(volume: number): void {
+  const next = Math.min(1, Math.max(0, volume));
+  localStorage.setItem(VOLUME_KEY, String(next));
+  if (activeAudio) activeAudio.volume = next;
+  publishPlayerState();
+}
+
+/** 上一首 / 下一首：复用目录内音频列表，到头后循环 */
+export async function skipMedia(direction: -1 | 1): Promise<void> {
+  const path = activeAudioPath;
+  if (!path || !navigateTo) return;
+  try {
+    const files = await invoke<string[]>("list_audio_siblings", { path });
+    if (files.length === 0) return;
+    const index = files.findIndex((item) => samePath(item, path));
+    if (index < 0) return;
+    const target = files[(index + direction + files.length) % files.length];
+    if (!target || samePath(target, path)) return;
+    autoplayPath = target;
+    await navigateTo(target);
+  } catch {
+    // 目录读不到时不处理，保持当前播放
+  }
+}
+
+// 桌面歌词窗发来的控制命令
+void listen<{ action: string; value?: number }>("desktop-lyric-command", (event) => {
+  const { action, value } = event.payload;
+  if (action === "prev") void skipMedia(-1);
+  else if (action === "next") void skipMedia(1);
+  else if (action === "volume" && typeof value === "number") setMediaVolume(value / 100);
+});
+
+// 桌面歌词窗刚打开时主动要一份当前状态，否则要等下次变化才知道有没有媒体
+void listen("desktop-lyric-state-request", () => publishPlayerState());
+
 function mediaMime(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith(".m4a")) return "audio/mp4";
@@ -956,6 +1024,10 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
   audio.style.width = "100%";
   audio.loop = getPlayMode() === "repeat-one";
   audio.playbackRate = getPlaybackRate();
+  audio.volume = getMediaVolume();
+  // 记录当前音频：桌面歌词窗的上一首/下一首与音量都作用在它身上
+  activeAudio = audio;
+  activeAudioPath = path;
 
   const card = document.createElement("div");
   card.className = "audio-card";
@@ -1006,6 +1078,8 @@ function renderAudio(host: HTMLElement, toolbar: HTMLElement, path: string): voi
     autoplayPath = null;
     void audio.play().catch(() => undefined);
   }
+  // 通知桌面歌词窗：有音频了，显示控制条并同步音量
+  publishPlayerState();
 }
 
 function renderVideo(host: HTMLElement, toolbar: HTMLElement, path: string): void {

@@ -2,7 +2,7 @@ import type { Window } from "@tauri-apps/api/window";
 import { showContextMenu } from "./context-menu";
 import type { EditorController } from "./editor";
 import { changeFontSize, getFontSize, onFontSizeChange, resetFontSize } from "./font-size";
-import { languageOf, type TabStore } from "./tabs";
+import { formatBytes, languageOf, type TabStore } from "./tabs";
 
 const stPos = document.getElementById("st-pos") as HTMLSpanElement;
 const stCount = document.getElementById("st-count") as HTMLSpanElement;
@@ -122,6 +122,23 @@ export function updateStatus(): void {
     if (binaryTitle !== lastWindowTitle) {
       lastWindowTitle = binaryTitle;
       void appWindow.setTitle(binaryTitle).catch(() => undefined);
+    }
+    return;
+  }
+  // 超大文本只读浏览：只显示文件总大小，行号/字数对分块视图没有意义
+  if (tab.large) {
+    stPos.textContent = "只读";
+    stCount.textContent = formatBytes(tab.large.total);
+    stEncoding.textContent = tab.large.encoding;
+    stEol.textContent = "—";
+    stLang.textContent = "大文件浏览";
+    stCursors.textContent = "";
+    stState.textContent = "只读";
+    stState.classList.remove("dirty");
+    const largeTitle = `${tab.title} - fEditor`;
+    if (largeTitle !== lastWindowTitle) {
+      lastWindowTitle = largeTitle;
+      void appWindow.setTitle(largeTitle).catch(() => undefined);
     }
     return;
   }

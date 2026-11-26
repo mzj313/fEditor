@@ -1,7 +1,7 @@
 //! 桌面歌词窗口：只负责显示主窗口推送的当前句/下一句，整条歌词带可拖动
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 
 interface LyricPayload {
   current: string;
@@ -188,6 +188,40 @@ for (const dot of document.querySelectorAll<HTMLButtonElement>(".dot")) {
 applyLyricSize();
 applyLyricStyle();
 void listen<LyricPayload>("desktop-lyric", (event) => show(event.payload));
+
+/* ---------- 播放控制：上一首 / 下一首 / 音量 ---------- */
+
+interface PlayerState {
+  hasMedia: boolean;
+  volume: number;
+}
+
+const controlsEl = document.getElementById("controls") as HTMLDivElement;
+// 注意不要用 prev/next 作 id：歌词的「下一句」元素已经占用了 next
+const prevButton = document.getElementById("prev-track") as HTMLButtonElement;
+const nextButton = document.getElementById("next-track") as HTMLButtonElement;
+const volumeInput = document.getElementById("volume") as HTMLInputElement;
+
+function sendCommand(action: string, value?: number): void {
+  void emit("desktop-lyric-command", { action, value }).catch(() => undefined);
+}
+
+prevButton.addEventListener("click", () => sendCommand("prev"));
+nextButton.addEventListener("click", () => sendCommand("next"));
+volumeInput.addEventListener("input", () => {
+  sendCommand("volume", Number(volumeInput.value));
+});
+
+void listen<PlayerState>("desktop-lyric-state", (event) => {
+  const { hasMedia, volume } = event.payload;
+  // 没有正在播放的音频时隐藏控制条，避免点了没反应
+  controlsEl.hidden = !hasMedia;
+  // 正在拖动滑块时不回写，否则光标会被拽回旧值
+  if (document.activeElement !== volumeInput) volumeInput.value = String(volume);
+});
+
+// 打开歌词窗时主动要一次状态，主窗口随即回推是否在播放以及当前音量
+void emit("desktop-lyric-state-request").catch(() => undefined);
 
 // 关闭按钮直接复用切换命令：隐藏窗口并记住当前位置
 document.getElementById("close")?.addEventListener("click", () => {

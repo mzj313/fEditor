@@ -596,6 +596,45 @@ body.resizing-y {
   min-height: 0;
 }
 
+/* 超大文本只读浏览：底部翻页条，不参与编辑 */
+#large-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text-dim);
+  font-size: 12px;
+  user-select: none;
+}
+
+#large-bar[hidden] {
+  display: none;
+}
+
+#large-info {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#large-bar button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+#large-bar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* 界面缩放（WebView2 原生 zoom）每帧都会触发整页重排，
    把各面板的布局与样式影响限制在自身内部，缩放时的重排开销会小很多 */
 #sidebar,
