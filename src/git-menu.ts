@@ -134,47 +134,162 @@ function statusColor(code: string): string {
   return STATUS_COLORS[code.trim().charAt(0)] ?? "#8b949e";
 }
 
-/** 把 git status --porcelain 的行渲染成彩色清单：状态码着色 + 文件路径 */
-function buildChangeList(changes: string[]): HTMLElement {
+/** 还原文 git 加引号的路径：中文等非 ASCII 会被转成八进制字节转义 */
+function unquoteGitPath(quoted: string): string {
+  let out = "";
+  const bytes: number[] = [];
+  // 八进制转义是 UTF-8 字节，需要攒够一段再用 TextDecoder 还原
+  const flush = () => {
+    if (bytes.length === 0) return;
+    out += new TextDecoder().decode(new Uint8Array(bytes));
+    bytes.length = 0;
+  };
+
+  for (let index = 0; index < quoted.length; index += 1) {
+    const char = quoted[index];
+    if (char !== "\\") {
+      flush();
+      out += char;
+      continue;
+    }
+    const next = quoted[index + 1] ?? "";
+    if (next >= "0" && next <= "7") {
+      bytes.push(parseInt(quoted.slice(index + 1, index + 4), 8));
+      index += 3;
+      continue;
+    }
+    flush();
+    out += next === "n" ? "\n" : next === "t" ? "\t" : next === "r" ? "\r" : next;
+    index += 1;
+  }
+  flush();
+  return out;
+}
+
+/** 从 porcelain 行解析真实路径：去掉状态码，处理引号转义与重命名 */
+function parseStatusPath(line: string): string {
+  // 格式固定为 "XY 路径"，第 3 个字符是分隔空格
+  let rest = line.slice(3);
+  // 重命名/复制写成 "旧 -> 新"，提交只需要新路径
+  const arrow = rest.indexOf(" -> ");
+  if (arrow >= 0) rest = rest.slice(arrow + 4);
+  return rest.startsWith('"') && rest.endsWith('"')
+    ? unquoteGitPath(rest.slice(1, -1))
+    : rest;
+}
+
+interface ChangePicker {
+  element: HTMLElement;
+  /** 当前勾选的文件路径；弹窗关闭后仍可读取 */
+  selected(): string[];
+}
+
+/** 把 git status --porcelain 的行渲染成带复选框的清单：状态码着色 + 文件路径 */
+function buildChangePicker(changes: string[]): ChangePicker {
   const wrap = document.createElement("div");
+  wrap.style.minWidth = "420px";
+
   const head = document.createElement("div");
-  head.textContent = `本次将提交以下 ${changes.length} 个文件：`;
+  head.textContent = `本次改动共 ${changes.length} 个文件，勾选要提交的：`;
   head.style.marginBottom = "6px";
   wrap.append(head);
+
+  const toolbar = document.createElement("div");
+  toolbar.style.cssText =
+    "display:flex;align-items:center;gap:12px;margin-bottom:6px;font-size:12px;";
+  const allLabel = document.createElement("label");
+  allLabel.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;";
+  const allBox = document.createElement("input");
+  allBox.type = "checkbox";
+  allBox.checked = true;
+  allLabel.append(allBox, document.createTextNode("全选"));
+
+  const count = document.createElement("span");
+  count.style.opacity = "0.7";
+  toolbar.append(allLabel, count);
+  wrap.append(toolbar);
 
   const list = document.createElement("div");
   list.style.cssText =
     "max-height:260px;overflow-y:auto;text-align:left;font-family:Consolas,monospace;font-size:12px;line-height:1.6;";
+  wrap.append(list);
+
+  const boxes: HTMLInputElement[] = [];
+  const syncCount = () => {
+    const picked = boxes.filter((box) => box.checked).length;
+    count.textContent = `已选 ${picked} / ${boxes.length}`;
+    allBox.checked = picked === boxes.length;
+    allBox.indeterminate = picked > 0 && picked < boxes.length;
+  };
+
   for (const line of changes) {
-    const row = document.createElement("div");
+    const row = document.createElement("label");
+    row.style.cssText = "display:flex;align-items:center;gap:6px;padding:1px 0;cursor:pointer;";
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = true;
+    box.dataset.path = parseStatusPath(line);
+    box.addEventListener("change", syncCount);
+
     const badge = document.createElement("span");
     badge.textContent = line.slice(0, 2);
     badge.style.cssText = `color:${statusColor(line.slice(0, 2))};font-weight:600;white-space:pre;`;
+
     const name = document.createElement("span");
     name.textContent = line.slice(2);
     name.style.whiteSpace = "pre-wrap";
-    row.append(badge, name);
+
+    row.append(box, badge, name);
     list.append(row);
+    boxes.push(box);
   }
-  wrap.append(list);
-  return wrap;
+
+  allBox.addEventListener("change", () => {
+    for (const box of boxes) box.checked = allBox.checked;
+    syncCount();
+  });
+  syncCount();
+
+  return {
+    element: wrap,
+    selected: () =>
+      boxes
+        .filter((box) => box.checked)
+        .map((box) => box.dataset.path ?? "")
+        .filter((path) => path.length > 0),
+  };
 }
 
 async function commitAllChanges(dir: string): Promise<void> {
-  if (!terminal) return;
-  // 提交前先展示改动清单，让用户确认这次提交会包含哪些文件
+  // 存成局部常量：多个 await 之后模块级变量的类型收窄会失效
+  const shell = terminal;
+  if (!shell) return;
+  // 提交前先展示改动清单，让用户勾选这次提交包含哪些文件
   const changes = await invoke<string[]>("git_status", { path: dir }).catch(() => [] as string[]);
   if (changes.length === 0) {
     await message("没有可提交的改动（工作区是干净的）。");
     return;
   }
-  const choice = await ask(buildChangeList(changes), [
+  const picker = buildChangePicker(changes);
+  const choice = await ask(picker.element, [
     { label: "继续提交", value: "ok", primary: true },
     { label: "取消", value: "cancel" },
   ]);
   if (choice !== "ok") return;
+  // 弹窗只是隐藏、DOM 还在，关闭后照常读取勾选结果
+  const picked = picker.selected();
+  if (picked.length === 0) {
+    await message("请至少勾选一个文件。");
+    return;
+  }
   const text = await promptText("提交信息");
   if (!text) return;
-  // 先暂存全部改动再提交，提交信息按当前 shell 的引号规则转义
-  await terminal.run(dir, ["git add -A", `git commit -m ${terminal.quoteArg(text)}`]);
+  // 先清空暂存区，再只暂存勾选的文件，避免把未勾选的改动一起提交出去
+  const args = picked.map((path) => shell.quoteArg(path)).join(" ");
+  await shell.run(dir, [
+    "git reset --quiet",
+    `git add -- ${args}`,
+    `git commit -m ${shell.quoteArg(text)}`,
+  ]);
 }

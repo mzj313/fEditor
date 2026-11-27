@@ -34,8 +34,17 @@ interface DiskHealth {
   powerOnHours: number | null;
 }
 
+/** 一次调用返回 CPU/内存与磁盘基础信息 */
+interface Overview {
+  system: SystemInfo;
+  disks: DiskHealth[];
+}
+
 /** 自动刷新间隔：读一次要拉起 PowerShell，30 秒足够及时又不浪费 */
 const REFRESH_INTERVAL = 30_000;
+
+/** 最近一次成功读取的结果：打开面板先秒出旧数据，再后台刷新 */
+const CACHE_KEY = "fEditor.systemOverview";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -222,23 +231,34 @@ export default {
       for (const disk of latest) list.append(renderDiskCard(merged(disk)));
     };
 
+    // 先用上次结果铺满界面，避免每次打开都要先等 PowerShell 跑完
+    try {
+      const cached = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "null") as Overview | null;
+      if (cached?.system) {
+        system = cached.system;
+        latest = cached.disks ?? [];
+        renderSystem();
+        renderDisks();
+      }
+    } catch {
+      // 缓存损坏时忽略，按首次打开处理
+    }
+
     const load = async (): Promise<void> => {
       if (loading) return;
       loading = true;
       refresh.disabled = true;
       refresh.textContent = "读取中…";
-      // CPU/内存与磁盘互不依赖，并行拉取缩短等待；任一失败不影响另一部分
-      const [sysResult, diskResult] = await Promise.allSettled([
-        invoke<SystemInfo>("read_system_info"),
-        invoke<DiskHealth[]>("read_disk_health"),
-      ]);
-      if (sysResult.status === "fulfilled") system = sysResult.value;
-      if (diskResult.status === "fulfilled") {
-        latest = diskResult.value;
+      try {
+        // 一次 IPC 拿全：Rust 侧会缓存静态信息，刷新时只查使用率与内存
+        const overview = await invoke<Overview>("read_overview");
+        system = overview.system;
+        latest = overview.disks;
         stamp.textContent = `更新于 ${new Date().toLocaleTimeString()}`;
-      } else {
-        latest = [];
-        stamp.textContent = String(diskResult.reason);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(overview));
+      } catch (error) {
+        // 读取失败保留上一次的结果，只更新提示
+        stamp.textContent = String(error);
       }
       renderSystem();
       renderDisks();

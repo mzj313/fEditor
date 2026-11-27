@@ -396,7 +396,7 @@ searchInput.addEventListener("keydown", (event) => {
 
 syncSearchMode();
 
-/** Ctrl+Shift+F：打开侧栏并聚焦全文搜索 */
+/** Ctrl+Shift+H：打开侧栏并聚焦全文搜索 */
 export function focusContentSearch(): void {
   if (!app.tree.currentRoot) {
     showTransientStatus("请先打开文件夹，再进行全文搜索");

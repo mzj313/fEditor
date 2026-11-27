@@ -8,7 +8,7 @@
 
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskHealth {
     pub name: String,
@@ -25,12 +25,30 @@ pub struct DiskHealth {
     pub power_on_hours: Option<i64>,
 }
 
-/// 普通权限读取：只有基础信息，可靠性相关字段通常为空
+/// 系统信息概览：一次调用同时返回 CPU/内存与磁盘基础信息，
+/// 避免前端串起两次 PowerShell，打开面板少等一次进程启动
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    pub system: SystemInfo,
+    pub disks: Vec<DiskHealth>,
+}
+
+/// 静态信息（CPU 型号、磁盘型号/容量）几乎不变，缓存后刷新只查使用率与内存
+struct StaticInfo {
+    cpus: Vec<CpuInfo>,
+    disks: Vec<DiskHealth>,
+}
+
+static STATIC_CACHE: std::sync::Mutex<Option<(std::time::Instant, StaticInfo)>> =
+    std::sync::Mutex::new(None);
+const STATIC_TTL_SECS: u64 = 600;
+
 #[tauri::command]
-pub async fn read_disk_health() -> Result<Vec<DiskHealth>, String> {
-    tauri::async_runtime::spawn_blocking(read_disk_health_blocking)
+pub async fn read_overview() -> Result<Overview, String> {
+    tauri::async_runtime::spawn_blocking(read_overview_blocking)
         .await
-        .map_err(|e| format!("读取磁盘信息失败：{e}"))?
+        .map_err(|e| format!("读取系统信息失败：{e}"))?
 }
 
 /// 提权读取：会弹一次 UAC，成功后温度 / 磨损 / 通电时间可用
@@ -41,9 +59,10 @@ pub async fn read_disk_health_elevated() -> Result<Vec<DiskHealth>, String> {
         .map_err(|e| format!("读取磁盘信息失败：{e}"))?
 }
 
-/// 采集脚本的主体：$disks 收集完成后由调用方决定输出方式
+/// 详细采集（提权用）：Get-PhysicalDisk 能带出温度、磨损、通电时间，
+/// 但模块加载和可靠性计数器都很慢，只在用户授权后跑一次
 #[cfg(target_os = "windows")]
-const COLLECT_SCRIPT: &str = r#"
+const DETAIL_COLLECT_SCRIPT: &str = r#"
 $disks = Get-PhysicalDisk | ForEach-Object {
   $counter = $_ | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue
   [pscustomobject]@{
@@ -61,30 +80,124 @@ $disks = Get-PhysicalDisk | ForEach-Object {
 }
 "#;
 
+/// 首次调用：静态信息 + 动态信息一次拿全
 #[cfg(target_os = "windows")]
-fn read_disk_health_blocking() -> Result<Vec<DiskHealth>, String> {
+const FULL_SCRIPT: &str = r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$cpus = Get-CimInstance Win32_Processor | ForEach-Object {
+  [pscustomobject]@{
+    name = $_.Name.Trim()
+    cores = $_.NumberOfCores
+    threads = $_.NumberOfLogicalProcessors
+    maxClockMhz = $_.MaxClockSpeed
+  }
+}
+$perf = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'" -ErrorAction SilentlyContinue
+$os = Get-CimInstance Win32_OperatingSystem
+$disks = Get-CimInstance Win32_DiskDrive | ForEach-Object {
+  [pscustomobject]@{
+    name = $_.Model
+    size = $_.Size
+    busType = [string]$_.InterfaceType
+    mediaType = [string]$_.MediaType
+    health = [string]$_.Status
+    firmware = $_.FirmwareRevision
+    serial = $_.SerialNumber
+  }
+}
+[pscustomobject]@{
+  cpus = @($cpus)
+  cpuUsage = if ($perf) { [int]$perf.PercentProcessorTime } else { 0 }
+  totalMemory = [long]$os.TotalVisibleMemorySize * 1024
+  freeMemory = [long]$os.FreePhysicalMemory * 1024
+  disks = @($disks)
+} | ConvertTo-Json -Compress -Depth 4
+"#;
+
+/// 缓存命中后的刷新：只查会变化的使用率与内存
+#[cfg(target_os = "windows")]
+const DYNAMIC_SCRIPT: &str = r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$perf = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'" -ErrorAction SilentlyContinue
+$os = Get-CimInstance Win32_OperatingSystem
+[pscustomobject]@{
+  cpuUsage = if ($perf) { [int]$perf.PercentProcessorTime } else { 0 }
+  totalMemory = [long]$os.TotalVisibleMemorySize * 1024
+  freeMemory = [long]$os.FreePhysicalMemory * 1024
+} | ConvertTo-Json -Compress
+"#;
+
+#[cfg(target_os = "windows")]
+fn run_powershell(script: &str) -> Result<serde_json::Value, String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
 
     // 不弹出控制台窗口
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\r\n{COLLECT_SCRIPT}\r\nConvertTo-Json -InputObject @($disks) -Compress"
-    );
 
     let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("无法调用 PowerShell：{e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("读取磁盘信息失败：{}", stderr.trim()));
+        return Err(format!("读取系统信息失败：{}", stderr.trim()));
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    parse_disks(text.trim())
+    serde_json::from_str(text.trim_start_matches('\u{feff}').trim())
+        .map_err(|e| format!("解析系统信息失败：{e}"))
+}
+
+#[cfg(target_os = "windows")]
+fn read_overview_blocking() -> Result<Overview, String> {
+    let cached = STATIC_CACHE.lock().ok().and_then(|guard| {
+        guard.as_ref().and_then(|(at, info)| {
+            (at.elapsed().as_secs() < STATIC_TTL_SECS).then(|| StaticInfo {
+                cpus: info.cpus.clone(),
+                disks: info.disks.clone(),
+            })
+        })
+    });
+
+    // 缓存有效：只跑动态脚本，省掉最慢的磁盘与 CPU 型号查询
+    if let Some(info) = cached {
+        let value = run_powershell(DYNAMIC_SCRIPT)?;
+        return Ok(Overview {
+            system: SystemInfo {
+                cpus: info.cpus,
+                cpu_usage: json_num(&value, "cpuUsage").unwrap_or(0),
+                total_memory: value.get("totalMemory").and_then(|v| v.as_u64()).unwrap_or(0),
+                free_memory: value.get("freeMemory").and_then(|v| v.as_u64()).unwrap_or(0),
+            },
+            disks: info.disks,
+        });
+    }
+
+    let value = run_powershell(FULL_SCRIPT)?;
+    let cpus = parse_cpus(&value);
+    let disks = parse_disks_value(&value);
+    // 写缓存失败不影响本次结果
+    if let Ok(mut guard) = STATIC_CACHE.lock() {
+        *guard = Some((
+            std::time::Instant::now(),
+            StaticInfo {
+                cpus: cpus.clone(),
+                disks: disks.clone(),
+            },
+        ));
+    }
+    Ok(Overview {
+        system: SystemInfo {
+            cpus,
+            cpu_usage: json_num(&value, "cpuUsage").unwrap_or(0),
+            total_memory: value.get("totalMemory").and_then(|v| v.as_u64()).unwrap_or(0),
+            free_memory: value.get("freeMemory").and_then(|v| v.as_u64()).unwrap_or(0),
+        },
+        disks,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -120,7 +233,7 @@ fn read_disk_health_elevated_blocking() -> Result<Vec<DiskHealth>, String> {
 
     // 提权脚本：把 JSON 写到临时文件（runas 拿不到子进程 stdout）
     let script = format!(
-        "$ErrorActionPreference = 'Stop'\r\n{COLLECT_SCRIPT}\r\n$json = ConvertTo-Json -InputObject @($disks) -Compress\r\n[IO.File]::WriteAllText('{out}', $json, (New-Object System.Text.UTF8Encoding($false)))",
+        "$ErrorActionPreference = 'Stop'\r\n{DETAIL_COLLECT_SCRIPT}\r\n$json = ConvertTo-Json -InputObject @($disks) -Compress\r\n[IO.File]::WriteAllText('{out}', $json, (New-Object System.Text.UTF8Encoding($false)))",
         out = out_path.to_string_lossy().replace('\'', "''")
     );
     std::fs::write(&script_path, script).map_err(|e| format!("无法写入临时脚本：{e}"))?;
@@ -168,6 +281,23 @@ fn read_disk_health_elevated_blocking() -> Result<Vec<DiskHealth>, String> {
     }
 }
 
+/// JSON 对象转磁盘结构；单块盘与数组共用同一套字段映射
+#[cfg(target_os = "windows")]
+fn disk_from_value(item: &serde_json::Value) -> DiskHealth {
+    DiskHealth {
+        name: json_str(item, "name"),
+        size: item.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
+        bus_type: json_str(item, "busType"),
+        media_type: json_str(item, "mediaType"),
+        health: json_str(item, "health"),
+        firmware: json_str(item, "firmware"),
+        serial: json_str(item, "serial"),
+        temperature: json_num(item, "temperature"),
+        wear: json_num(item, "wear"),
+        power_on_hours: json_num(item, "powerOnHours"),
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn parse_disks(text: &str) -> Result<Vec<DiskHealth>, String> {
     if text.is_empty() {
@@ -176,26 +306,39 @@ fn parse_disks(text: &str) -> Result<Vec<DiskHealth>, String> {
     let value: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("解析磁盘信息失败：{e}"))?;
     // 单块磁盘时 ConvertTo-Json 可能给对象而不是数组，这里统一成数组
-    let items = match value {
-        serde_json::Value::Array(items) => items,
-        other => vec![other],
-    };
+    Ok(match value {
+        serde_json::Value::Array(items) => items.iter().map(disk_from_value).collect(),
+        other => vec![disk_from_value(&other)],
+    })
+}
 
-    Ok(items
-        .iter()
-        .map(|item| DiskHealth {
-            name: json_str(item, "name"),
-            size: item.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
-            bus_type: json_str(item, "busType"),
-            media_type: json_str(item, "mediaType"),
-            health: json_str(item, "health"),
-            firmware: json_str(item, "firmware"),
-            serial: json_str(item, "serial"),
-            temperature: json_num(item, "temperature"),
-            wear: json_num(item, "wear"),
-            power_on_hours: json_num(item, "powerOnHours"),
+/// 从概览结果里取磁盘数组，同样兼容单块盘被序列化成对象的情况
+#[cfg(target_os = "windows")]
+fn parse_disks_value(value: &serde_json::Value) -> Vec<DiskHealth> {
+    match value.get("disks") {
+        Some(serde_json::Value::Array(items)) => items.iter().map(disk_from_value).collect(),
+        Some(other) => vec![disk_from_value(other)],
+        None => Vec::new(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_cpus(value: &serde_json::Value) -> Vec<CpuInfo> {
+    value
+        .get("cpus")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| CpuInfo {
+                    name: json_str(item, "name"),
+                    cores: json_num(item, "cores").unwrap_or(0),
+                    threads: json_num(item, "threads").unwrap_or(0),
+                    max_clock_mhz: json_num(item, "maxClockMhz").unwrap_or(0),
+                })
+                .collect()
         })
-        .collect())
+        .unwrap_or_default()
 }
 
 #[cfg(target_os = "windows")]
@@ -213,8 +356,8 @@ fn json_num(value: &serde_json::Value, key: &str) -> Option<i64> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn read_disk_health_blocking() -> Result<Vec<DiskHealth>, String> {
-    Err("当前系统暂不支持磁盘健康读取（仅 Windows）".to_string())
+fn read_overview_blocking() -> Result<Overview, String> {
+    Err("当前系统暂不支持系统信息读取（仅 Windows）".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -224,7 +367,7 @@ fn read_disk_health_elevated_blocking() -> Result<Vec<DiskHealth>, String> {
 
 /* ---------------- CPU / 内存 ---------------- */
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CpuInfo {
     pub name: String,
@@ -241,85 +384,4 @@ pub struct SystemInfo {
     pub cpu_usage: i64,
     pub total_memory: u64,
     pub free_memory: u64,
-}
-
-/// CPU 与内存概览；使用率是采样值，适合配合定时刷新
-#[tauri::command]
-pub async fn read_system_info() -> Result<SystemInfo, String> {
-    tauri::async_runtime::spawn_blocking(read_system_info_blocking)
-        .await
-        .map_err(|e| format!("读取系统信息失败：{e}"))?
-}
-
-#[cfg(target_os = "windows")]
-const SYSTEM_SCRIPT: &str = r#"
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$cpus = Get-CimInstance Win32_Processor | ForEach-Object {
-  [pscustomobject]@{
-    name = $_.Name.Trim()
-    cores = $_.NumberOfCores
-    threads = $_.NumberOfLogicalProcessors
-    maxClockMhz = $_.MaxClockSpeed
-  }
-}
-$perf = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'" -ErrorAction SilentlyContinue
-$os = Get-CimInstance Win32_OperatingSystem
-[pscustomobject]@{
-  cpus = @($cpus)
-  cpuUsage = if ($perf) { [int]$perf.PercentProcessorTime } else { 0 }
-  totalMemory = [long]$os.TotalVisibleMemorySize * 1024
-  freeMemory = [long]$os.FreePhysicalMemory * 1024
-} | ConvertTo-Json -Compress -Depth 4
-"#;
-
-#[cfg(target_os = "windows")]
-fn read_system_info_blocking() -> Result<SystemInfo, String> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", SYSTEM_SCRIPT])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("无法调用 PowerShell：{e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("读取系统信息失败：{}", stderr.trim()));
-    }
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let text = text.trim_start_matches('\u{feff}').trim();
-    let value: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| format!("解析系统信息失败：{e}"))?;
-
-    let cpus = value
-        .get("cpus")
-        .and_then(|v| v.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| CpuInfo {
-                    name: json_str(item, "name"),
-                    cores: json_num(item, "cores").unwrap_or(0),
-                    threads: json_num(item, "threads").unwrap_or(0),
-                    max_clock_mhz: json_num(item, "maxClockMhz").unwrap_or(0),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(SystemInfo {
-        cpus,
-        cpu_usage: json_num(&value, "cpuUsage").unwrap_or(0),
-        total_memory: value.get("totalMemory").and_then(|v| v.as_u64()).unwrap_or(0),
-        free_memory: value.get("freeMemory").and_then(|v| v.as_u64()).unwrap_or(0),
-    })
-}
-
-#[cfg(not(target_os = "windows"))]
-fn read_system_info_blocking() -> Result<SystemInfo, String> {
-    Err("当前系统暂不支持系统信息读取（仅 Windows）".to_string())
 }

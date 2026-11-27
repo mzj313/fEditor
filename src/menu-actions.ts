@@ -44,8 +44,15 @@ async function formatJsonTab(): Promise<void> {
   const { store, editor } = app;
   const tab = store.active;
   if (!tab) return;
+  // 只对文本文件生效：二进制预览、大文件只读浏览直接忽略，不做任何提示
+  if (tab.binary || tab.large) return;
 
-  if (isJson(tab.title)) {
+  const yaml = isYaml(tab.title);
+  const toml = isToml(tab.title);
+
+  if (!yaml && !toml) {
+    // 标题没有 .json 扩展名（比如新建的未命名标签）时按内容探测：
+    // 只有能解析成 JSON 才格式化，普通文本给出提示而不是报一堆解析错误
     if (!ensureEditMode()) return;
     const state = editor.state;
     const range = state.selection.main;
@@ -54,7 +61,11 @@ async function formatJsonTab(): Promise<void> {
       : state.sliceDoc(range.from, range.to);
     const result = formatJsonText(source);
     if (!result.ok) {
-      showTransientStatus(`JSON 格式错误：${result.error}`);
+      showTransientStatus(
+        isJson(tab.title)
+          ? `JSON 格式错误：${result.error}`
+          : "只有 JSON / YAML / TOML 支持格式化",
+      );
       return;
     }
     const changes = range.empty
@@ -62,12 +73,6 @@ async function formatJsonTab(): Promise<void> {
       : { from: range.from, to: range.to };
     editor.replaceText(result.text, changes);
     showTransientStatus("已格式化 JSON");
-    return;
-  }
-
-  const yaml = isYaml(tab.title);
-  if (!yaml && !isToml(tab.title)) {
-    showTransientStatus("只有 JSON / YAML / TOML 支持格式化");
     return;
   }
 
@@ -228,8 +233,8 @@ async function showFeatures(): Promise<void> {
       [
         "Markdown、JSON、YAML、TOML、SVG 等语法高亮",
         "查找 Ctrl+F、替换 Ctrl+H；JSON 行号栏可折叠代码块",
-        "侧栏搜索支持文件名与全文两种模式，全文可切换大小写与正则，Ctrl+Shift+F 直接唤起",
-        "列块模式 Ctrl+Alt+B；格式化文档 Ctrl+Alt+J",
+        "侧栏搜索支持文件名与全文两种模式，全文可切换大小写与正则，Ctrl+Shift+H 直接唤起",
+        "列块模式 Ctrl+Alt+B；格式化文档 Ctrl+Shift+F，支持只格式化选中部分",
         "所有菜单动作的快捷键可在设置中自定义",
       ],
     ],

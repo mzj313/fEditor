@@ -24,7 +24,7 @@ const BASE_SHORTCUTS: Record<string, string> = {
   "settings.open": "Ctrl+,",
   "edit.find": "Ctrl+F",
   "edit.replace": "Ctrl+H",
-  "edit.findInFiles": "Ctrl+Shift+F",
+  "edit.findInFiles": "Ctrl+Shift+H",
   "format.bold": "Ctrl+B",
   // Ctrl+I 被 CodeMirror 占用（选中父级语法节点），改用与其它格式命令一致的 Ctrl+Alt 组合
   "format.italic": "Ctrl+Alt+I",
@@ -37,7 +37,7 @@ const BASE_SHORTCUTS: Record<string, string> = {
   "format.quote": "Ctrl+Alt+Q",
   "format.link": "Ctrl+Alt+K",
   "format.code": "Ctrl+Alt+C",
-  "format.document": "Ctrl+Alt+J",
+  "format.document": "Ctrl+Shift+F",
   "edit.block": "Ctrl+Alt+B",
 };
 
