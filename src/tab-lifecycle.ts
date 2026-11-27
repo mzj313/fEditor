@@ -26,6 +26,7 @@ import {
   isMarkdown,
   isSvg,
   isToml,
+  isXml,
   isYaml,
   normalizePath,
   type Tab,
@@ -73,6 +74,8 @@ export async function applyLanguage(title: string): Promise<void> {
     await editor.ensureYaml();
   } else if (isToml(title)) {
     await editor.ensureToml();
+  } else if (isXml(title)) {
+    await editor.ensureXml();
   }
 }
 

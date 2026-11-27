@@ -54,6 +54,8 @@ const darkHighlight = HighlightStyle.define([
   { tag: [tags.link, tags.url], color: "#66d9ef", textDecoration: "underline" },
   { tag: [tags.meta, tags.processingInstruction], color: "#75715e" },
   { tag: tags.invalid, color: "#960050" },
+  // XML 的 DOCTYPE 声明在默认配色里和正文太接近，单独压暗一点
+  { tag: tags.documentMeta, color: "#75715e" },
 ]);
 
 const darkTheme = [
@@ -73,10 +75,40 @@ const darkTheme = [
       ".cm-tooltip": { backgroundColor: "#1e1f1c", border: "1px solid #3e3d32", color: "#f8f8f2" },
       ".cm-searchMatch": { backgroundColor: "rgba(230, 219, 116, 0.28)" },
       ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "rgba(230, 219, 116, 0.5)" },
+      // 折叠后的省略号占位加淡背景，和 JSON 的折叠观感一致
+      ".cm-foldPlaceholder": {
+        backgroundColor: "rgba(255, 255, 255, 0.14)",
+        border: "none",
+        color: "#c8c8c0",
+        padding: "0 4px",
+        borderRadius: "3px",
+      },
     },
     { dark: true },
   ),
   syntaxHighlighting(darkHighlight),
+];
+
+/** 亮色主题的 XML 配色：标签、属性名、属性值分色，比默认配色更有层次 */
+const lightHighlight = HighlightStyle.define([
+  { tag: tags.tagName, color: "#2563c9" },
+  { tag: tags.angleBracket, color: "#9ca3af" },
+  { tag: tags.attributeName, color: "#b45309" },
+  { tag: tags.attributeValue, color: "#15803d" },
+  { tag: [tags.documentMeta, tags.processingInstruction], color: "#7c3aed" },
+]);
+
+const lightTheme = [
+  syntaxHighlighting(lightHighlight),
+  EditorView.theme({
+    ".cm-foldPlaceholder": {
+      backgroundColor: "rgba(0, 0, 0, 0.06)",
+      border: "none",
+      color: "#6b7280",
+      padding: "0 4px",
+      borderRadius: "3px",
+    },
+  }),
 ];
 
 /** 新建编辑器状态时使用当前主题；切换主题时由 setTheme 重新配置已打开的视图 */
@@ -186,7 +218,7 @@ export class EditorController {
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       // 选中文本后把全文相同内容一起标出来，双击选词即可看出所有出现位置
       highlightSelectionMatches(),
-      themeCompartment.of(darkMode ? darkTheme : []),
+      themeCompartment.of(darkMode ? darkTheme : lightTheme),
       wrapCompartment.of(EditorView.lineWrapping),
       languageCompartment.of([]),
       searchCompartment.of([]),
@@ -278,7 +310,7 @@ export class EditorController {
   setTheme(dark: boolean): void {
     darkMode = dark;
     this.view.dispatch({
-      effects: themeCompartment.reconfigure(dark ? darkTheme : []),
+      effects: themeCompartment.reconfigure(dark ? darkTheme : lightTheme),
     });
   }
 
@@ -303,6 +335,14 @@ export class EditorController {
   async ensureYaml(): Promise<void> {
     const { yaml } = await import("@codemirror/lang-yaml");
     this.view.dispatch({ effects: languageCompartment.reconfigure(yaml()) });
+  }
+
+  /** XML 用官方语法包，自带语法树折叠；foldGutter 负责在行号旁显示箭头。 */
+  async ensureXml(): Promise<void> {
+    const { xml } = await import("@codemirror/lang-xml");
+    this.view.dispatch({
+      effects: languageCompartment.reconfigure([xml(), foldGutter()]),
+    });
   }
 
   /** TOML 官方没有独立语法包，复用 legacy-modes 的流式词法。 */

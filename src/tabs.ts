@@ -92,6 +92,18 @@ export function isYaml(title: string): boolean {
 }
 
 /** TOML 常见于 Cargo.toml、pyproject.toml 等配置文件。 */
+/** XML 家族用官方语法包：语法高亮 + 元素按行折叠，扩展名大小写不敏感。 */
+export function isXml(title: string): boolean {
+  const lower = title.toLowerCase();
+  return (
+    lower.endsWith(".xml") ||
+    lower.endsWith(".xsd") ||
+    lower.endsWith(".xsl") ||
+    lower.endsWith(".xslt")
+  );
+}
+
+/** TOML 官方没有独立语法包，复用 legacy-modes 的流式词法。 */
 export function isToml(title: string): boolean {
   return title.toLowerCase().endsWith(".toml");
 }
